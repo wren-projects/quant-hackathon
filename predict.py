@@ -1,2 +1,6 @@
-#for functions that handle predicting results
+#handles predicting results
 import analysis
+
+import numpy as np
+import xgboost as xgb
+import scikit-learn

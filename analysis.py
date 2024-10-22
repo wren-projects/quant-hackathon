@@ -1,1 +1,1 @@
-#for functions that extract information from dataset
+#extracts information from dataset
