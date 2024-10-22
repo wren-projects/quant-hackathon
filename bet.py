@@ -1,0 +1,1 @@
+#for functions that handle betting starteggy
