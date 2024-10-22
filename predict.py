@@ -3,4 +3,4 @@ import analysis
 
 import numpy as np
 import xgboost as xgb
-import scikit-learn
+import sklearn
