@@ -11,7 +11,7 @@ class Data:
         data = ""
         return data
 
-    def get_train_matrix(self) -> np.array:
+    def get_train_matrix(self) -> np.ndarray:
         "gets train matrix, match outcome is in the last column"
         features = [self.get_home_avg_points, self.get_away_avg_points, self.get_match_outcomes]
         array_list = [func() for func in features]
@@ -19,7 +19,7 @@ class Data:
         return train_matrix
     
 
-    def get_match_array(self, team_home, team_away) -> np.array:
+    def get_match_array(self, team_home, team_away) -> np.ndarray:
         """returns array for specific match, used for predicting"""
         pass
 
@@ -29,11 +29,11 @@ class Data:
 
 
 
-    def get_home_avg_points() -> np.array:
+    def get_home_avg_points() -> np.ndarray:
         pass
 
-    def get_away_avg_points() -> np.array:
+    def get_away_avg_points() -> np.ndarray:
         pass
 
-    def get_match_outcomes() -> np.array:
+    def get_match_outcomes() -> np.ndarray:
         pass
