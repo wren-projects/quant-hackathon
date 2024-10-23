@@ -15,8 +15,8 @@ class Data:
     def get_train_matrix(self) -> np.ndarray:
         """gets train matrix, match outcome is in the last column (1 - home win, 0 - home loose)"""
         """train_matrix format
-            [[home_parametr, away_parametr,..., match_parametr, match_outcome]
-             [home_parametr, away_parametr,..., match_parametr, match_outcome]
+            [[home_parametr, away_parametr,..., match_parametr, match_outcome],
+             [home_parametr, away_parametr,..., match_parametr, match_outcome],
              ...
              [home_parametr, away_parametr,..., match_parametr, match_outcome]]
         """
