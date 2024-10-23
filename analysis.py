@@ -1,34 +1,33 @@
-#extracts information from dataset
-
+# extracts information from dataset
 import numpy as np
 
-class Data():
+class Data:
+    # all arrays and matrixes needs to be in the same order and of the same size
     def __init__(self, data_path):
         self.data = self.load_data(data_path)
-
 
     def load_data(self, data_path):
         """formats data to desired format"""
         data = ""
         return data
-    
+
     def get_train_matrix(self) -> np.array:
         "gets train matrix, match outcome is in the last column"
-
         features = [self.get_home_avg_points(), self.get_away_avg_points(), self.get_match_outcomes]
-
-        matrix = [func() for func in features]
-
-        return np.stack(matrix).T
-    
+        array_list = [func() for func in features]
+        return np.stack(array_list).T
     
 
+    def get_match_array(self, team_home, team_away) -> np.array:
+        """returns array for specific match, used for predicting"""
+        pass
+
+    def add_new_match_outcome(new_match):
+        """adds new information to existing dataset"""
+        pass
 
 
 
-
-
-    
     def get_home_avg_points() -> np.array:
         pass
 
@@ -37,5 +36,3 @@ class Data():
 
     def get_match_outcomes() -> np.array:
         pass
-
-        
