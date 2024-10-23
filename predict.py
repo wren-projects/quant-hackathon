@@ -30,8 +30,8 @@ class Ai:
 
         return model
     
-    def save_model():
+    def save_model(self):
         pass
 
-    def load_model_from_file(path):
+    def load_model_from_file(self, path):
         pass
