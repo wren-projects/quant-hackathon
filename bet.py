@@ -21,7 +21,7 @@ class Player:
         return (total_profit - self.R) / math.sqrt(total_var)
 
     def min_function(self, props, probs, ratios) -> float:
-        """functions that we are trying to minimaze for sharp ratio"""
+        """function that we are trying to minimaze for sharp ratio"""
         total_profit = 0
         total_var = 0
         for i in range(len(probs)):
@@ -41,7 +41,7 @@ class Player:
         return -self.sharpe_ratio(total_profit, total_var)
 
     def get_bet_proportions(self, probs, ratios) -> np.ndarray:
-        """returns proportions of budget to bet on"""
+        """returns proportions of the budget to bet on speific probs, (in the same format as probs)"""
         num_bets = probs.shape[0] * probs.shape[1]
         initial_props = np.full(num_bets, 1 / num_bets, dtype=float)
         # Constraint: sum of all props <= 1 (global budget constraint for entire 2D array), idk man it does something
