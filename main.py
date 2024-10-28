@@ -7,6 +7,7 @@ import os
 
 def next_round(player: Player, ai: Ai, new_matches, ratios):
     probabbilities = ai.get_probabilities(new_matches)
+    #ratios and probabilities have the same format
     bets = player.get_betting_strategy(probabbilities, ratios)
     put_bets(bets)
 

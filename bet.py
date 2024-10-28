@@ -27,15 +27,10 @@ class Player:
         for i in range(len(probs)):
             for j in range(2):
                 prob = probs[i][j]
-                # ratio for win, for loss it is 1/ratio ????
-                ratio = 0
-                if j == 0:
-                    ratio = 1 / ratios[i]
-                elif j == 1:
-                    ratio = ratios[i]
-                else:
-                    print("warning, out of bound. Player.min_function")
-                prop_of_budget = props[i * len(ratios) + j]
+                ratio = ratios[i][j]
+                prop_of_budget = props[i * len(probs[i]) + j]
+                if not len(probs[i]) == 2 or len(ratios) != len(probs):
+                    print("min_funciton, wrong format of probs")
                 total_profit += self.get_expected_profit(prob, ratio, prop_of_budget)
                 total_var += self.get_variance_of_profit(prob, ratio, prop_of_budget)
         return -self.sharpe_ratio(total_profit, total_var)
