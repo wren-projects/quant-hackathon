@@ -4,6 +4,9 @@ from predict import Ai
 import numpy as np
 import os
 
+from quant.analysis import Data
+from quant.bet import Player
+from quant.predict import Ai
 
 def next_round(player: Player, ai: Ai, new_matches, ratios):
     probabbilities = ai.get_probabilities(new_matches)
@@ -16,7 +19,7 @@ def put_bets(bets):
     pass
 
 
-if __name__ == "":
+def main() -> None:
     data_path = ""
     model_path = ""
     start_buget = 1000
@@ -33,3 +36,7 @@ if __name__ == "":
         player.edit_budget(new_buget)
         new_matches = []
         data.add_new_match_outcome(new_matches)
+
+
+if __name__ == "__main__":
+    main()

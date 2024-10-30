@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "quant"
+description = "AI powered betting algorithm"
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+numpy = "^2.1"
+scikit-learn = "^1.5"
+scipy = "^1.14"
+xgboost = "^2.1"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.10"
+ruff = "^0.7"
+pyright = "^1.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

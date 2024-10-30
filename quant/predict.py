@@ -1,7 +1,6 @@
 # handles predicting results
 from data import Data
 
-import numpy as np
 import xgboost as xgb
 from sklearn import model_selection, metrics
 import os
