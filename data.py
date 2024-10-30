@@ -28,9 +28,6 @@ class Data:
     def get_match_array(self, team_home, team_away) -> np.ndarray:
         """returns array for specific match, used for predicting"""
         pass
-    
-    
-    
 
     def add_new_match_outcome(new_match):
         """adds new information to existing dataset"""

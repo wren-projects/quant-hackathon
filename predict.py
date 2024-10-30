@@ -3,7 +3,7 @@ from data import Data
 
 import numpy as np
 import xgboost as xgb
-from sklearn import model_selection,metrics
+from sklearn import model_selection, metrics
 import os
 
 
@@ -16,7 +16,7 @@ class Ai:
         else:
             self.model = self.load_model_from_file(model_path)
 
-    def train_model(self)->xgb.XGBClassifier:
+    def train_model(self) -> xgb.XGBClassifier:
         """returns trained model"""
         train_matrix = self.data.get_train_matrix()
         x_train, x_val, y_train, y_val = model_selection.train_test_split(
@@ -33,13 +33,11 @@ class Ai:
 
     def get_probabilities(self, new_matches) -> np.ndarray:
         """gets probabilities for match outcome [home_loss, home_win]"""
-        x = [self.data.get_match_array(match[0],match[1]) for match in new_matches]
+        x = [self.data.get_match_array(match[0], match[1]) for match in new_matches]
         return self.model.predict_proba(x)
-        
 
     def save_model(self):
-        self.model.save_model('model.json')
+        self.model.save_model("model.json")
 
-    def load_model_from_file(self, path)->xgb.XGBClassifier:
+    def load_model_from_file(self, path) -> xgb.XGBClassifier:
         return xgb.XGBClassifier.load_model(path)
-        
