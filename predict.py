@@ -1,5 +1,5 @@
 # handles predicting results
-from analysis import Data
+from data import Data
 
 import numpy as np
 import xgboost as xgb
