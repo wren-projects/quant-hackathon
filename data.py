@@ -21,7 +21,7 @@ class Data:
              [home_parametr, away_parametr,..., match_parametr, match_outcome]]
         """
         array_list = [self.get_home_avg_points(), self.get_away_avg_points(), self.get_match_outcomes()]
-        # funcions returns colums of the final train_matrix format, needs to be transposed
+        # funcion returns colums of the final train_matrix format, needs to be transposed
         train_matrix = np.stack(array_list).T
         return train_matrix
 
