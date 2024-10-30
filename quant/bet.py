@@ -4,6 +4,7 @@ import numpy as np
 import scipy.optimize
 
 
+
 class Player:
     def __init__(self, budget):
         self.budget = budget
