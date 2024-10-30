@@ -16,7 +16,7 @@ class Ai:
             self.model = self.load_model_from_file(model_path)
 
     def train_model(self) -> xgb.XGBClassifier:
-        """returns trained model"""
+        """returns trained modelaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"""
         train_matrix = self.data.get_train_matrix()
         x_train, x_val, y_train, y_val = model_selection.train_test_split(
             train_matrix[:, :-1], train_matrix[:, -1], test_size=0.1, random_state=2
