@@ -20,8 +20,7 @@ class Data:
              ...
              [home_parametr, away_parametr,..., match_parametr, match_outcome]]
         """
-        features = [self.get_home_avg_points, self.get_away_avg_points, self.get_match_outcomes]
-        array_list = [func() for func in features]
+        array_list = [self.get_home_avg_points(), self.get_away_avg_points(), self.get_match_outcomes()]
         # funcions returns colums of the final train_matrix format, needs to be transposed
         train_matrix = np.stack(array_list).T
         return train_matrix
