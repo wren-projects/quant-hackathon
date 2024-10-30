@@ -8,11 +8,11 @@ class Data:
         self.data = self.load_data(data_path)
 
     def load_data(self, data_path) -> str:
-        """Formats data to desired format."""
+        """Format data to desired format."""
         return ""
 
     def get_train_matrix(self) -> np.ndarray:
-        """Gets train matrix, match outcome is in the last column."""
+        """Get train matrix, match outcome is in the last column."""
         """train_matrix format
             [[home_parametr, away_parametr,..., match_parametr, match_outcome],
              [home_parametr, away_parametr,..., match_parametr, match_outcome],
@@ -29,11 +29,11 @@ class Data:
         return train_matrix
 
     def get_match_array(self, team_home, team_away) -> np.ndarray:
-        """returns array for specific match, used for predicting"""
+        """Return array for specific match, used for predicting."""
         pass
 
     def add_new_match_outcome(new_match):
-        """adds new information to existing dataset"""
+        """Add new information to existing dataset."""
         pass
 
     def get_home_avg_points() -> np.ndarray:

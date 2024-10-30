@@ -1,12 +1,11 @@
-from data import Data
-from bet import Player
-from predict import Ai
-import numpy as np
 import os
 
-from quant.analysis import Data
+import numpy as np
+
 from quant.bet import Player
+from quant.data import Data
 from quant.predict import Ai
+
 
 def next_round(player: Player, ai: Ai, new_matches, ratios):
     probabbilities = ai.get_probabilities(new_matches)
