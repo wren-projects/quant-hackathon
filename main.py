@@ -1,4 +1,4 @@
-from analysis import Data
+from data import Data
 from bet import Player
 from predict import Ai
 import numpy as np
