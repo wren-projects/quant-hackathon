@@ -3,6 +3,7 @@ import math
 
 import numpy as np
 import scipy.optimize
+import pandas as pd
 
 
 class Player:
@@ -53,7 +54,7 @@ class Player:
         )
         return result.x.reshape(probs.shape)
 
-    def get_betting_strategy(self, probabbilities, ratios) -> list:
+    def get_betting_strategy(self, probabbilities: np.ndarray, active_matches: pd.DataFrame) -> list:
         """Return absolute cash numbers and on what to bet in 2d list."""
         proportions = self.get_bet_proportions(probabbilities, ratios)
         bets = [[0] * 2 for _ in range(len(proportions))]
@@ -62,5 +63,5 @@ class Player:
                 bets[i][j] = proportions[i][j] * self.budget
         return bets
 
-    def edit_budget(self, new):
+    def update_budget(self, new):
         self.budget = new

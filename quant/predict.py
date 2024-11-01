@@ -5,6 +5,7 @@ import numpy as np
 import xgboost as xgb
 from data import Data
 from sklearn import metrics, model_selection
+import pandas as pd
 
 
 class Ai:
@@ -31,9 +32,9 @@ class Ai:
         print("Average confidence:", sum(prob) / len(prob))
         return model
 
-    def get_probabilities(self, new_matches) -> np.ndarray:
+    def get_probabilities(self, new_matches: pd.DataFrame) -> np.ndarray:
         """Get probabilities for match outcome [home_loss, home_win]."""
-        x = [self.data.get_match_array(match[0], match[1]) for match in new_matches]
+        x = [self.data.get_match_array(row) for _, row  in new_matches.iterrows()]
         return self.model.predict_proba(x)
 
     def save_model(self):
