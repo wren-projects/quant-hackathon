@@ -1,18 +1,18 @@
 # handles predicting results
 import os
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 from data import Data
 from sklearn import metrics, model_selection
-from sqlalchemy import Boolean
 
 
 class Ai:
     """Class for training and predicting."""
 
-    def __init__(self, train_new_model: Boolean, model_path: str, data: Data):
+    def __init__(self, train_new_model: Literal[True], model_path: str, data: Data):
         self.data = data
         if train_new_model or not os.path.exists(model_path):
             self.model = self.train_model()
