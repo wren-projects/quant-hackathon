@@ -2,14 +2,17 @@
 import os
 
 import numpy as np
+import pandas as pd
 import xgboost as xgb
 from data import Data
 from sklearn import metrics, model_selection
-import pandas as pd
+from sqlalchemy import Boolean
 
 
 class Ai:
-    def __init__(self, train_new_model, model_path, data: Data):
+    """Class for training and predicting."""
+
+    def __init__(self, train_new_model: Boolean, model_path: str, data: Data):
         self.data = data
         if train_new_model or not os.path.exists(model_path):
             self.model = self.train_model()
@@ -37,8 +40,10 @@ class Ai:
         x = [self.data.get_match_array(row) for _, row  in new_matches.iterrows()]
         return self.model.predict_proba(x)
 
-    def save_model(self):
+    def save_model(self) -> None:
+        """Save ML model."""
         self.model.save_model("model.json")
 
     def load_model_from_file(self, path) -> xgb.XGBClassifier:
+        """Load model from given file path."""
         return xgb.XGBClassifier.load_model(path)

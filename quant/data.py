@@ -4,9 +4,9 @@ import pandas as pd
 
 
 class Data:
-    # all arrays and matrixes needs to be in the same order and of the same size
-    def __init__(self):
-        self.data = self.load_data("")
+    """Class for working with data."""
+
+    # all arrays and matrixes needs to be in the same order and of the same siz
 
     def load_data(self, data_path) -> str:
         """Format data to desired format."""
@@ -29,7 +29,7 @@ class Data:
         train_matrix = np.stack(array_list).T
         return train_matrix
 
-    def get_match_array(self, match: pd.DataFrame) -> np.ndarray:
+    def get_match_array(self, match: pd.Series) -> np.ndarray:
         """Return array for specific match, used for predicting."""
         pass
 
