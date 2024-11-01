@@ -46,7 +46,7 @@ class Player:
         cons = [{"type": "ineq", "fun": lambda props: 1.0 - sum(props)}]
         min_proportion = summary.iloc[0]["Min_bet"]/summary.iloc[0]["Bankroll"]
         max_proportion = summary.iloc[0]["Max_bet"]/summary.iloc[0]["Bankroll"]
-        bounds = [(min_proportion, max_proportion) for _ in range(num_bets)]
+        bounds = [(0, max_proportion) for _ in range(num_bets)]
         result = scipy.optimize.minimize(
             self.min_function,
             initial_props,
