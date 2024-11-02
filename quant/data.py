@@ -1,4 +1,6 @@
 # extracts information from dataset
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -8,9 +10,9 @@ class Data:
 
     # all arrays and matrixes needs to be in the same order and of the same siz
 
-    def load_data(self, data_path) -> str:
+    def load_csv_into_pd(self, data_path: os.PathLike) -> pd.DataFrame:
         """Format data to desired format."""
-        return ""
+        return pd.read_csv(data_path)
 
     def get_train_matrix(self) -> np.ndarray:
         """Get train matrix, match outcome is in the last column."""
