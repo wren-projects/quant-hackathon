@@ -8,6 +8,7 @@ from quant.predict import Ai
 
 """Unused at the moment, could be modified to creating models"""
 
+
 def next_round(player: Player, ai: Ai, new_matches, ratios):
     probabbilities = ai.get_probabilities(new_matches)
     # ratios and probabilities have the same format

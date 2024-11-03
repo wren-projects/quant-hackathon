@@ -37,7 +37,7 @@ class Ai:
 
     def get_probabilities(self, new_matches: pd.DataFrame) -> np.ndarray:
         """Get probabilities for match outcome [home_loss, home_win]."""
-        x = [self.data.get_match_array(row) for _, row  in new_matches.iterrows()]
+        x = [self.data.get_match_array(row) for _, row in new_matches.iterrows()]
         return self.model.predict_proba(x)
 
     def save_model(self) -> None:
