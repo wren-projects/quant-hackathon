@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
@@ -21,7 +19,13 @@ class Model:
         self.elo = Elo()
         self.player = Player()
         self.data = Data()
-        self.ai = Ai.load_from_file(Path("quant/models/model.json"))
+        self.ai = Ai.untrained()
+        self.trained = False
+
+    def update_models(self, games_increment: pd.DataFrame) -> None:
+        """Update models."""
+        for match in (Match(*row) for row in games_increment.itertuples(index=False)):
+            self.elo.add_match(match)
 
     def place_bets(
         self,
@@ -30,8 +34,13 @@ class Model:
         inc: tuple[pd.DataFrame, pd.DataFrame],
     ) -> pd.DataFrame:
         """Run main function."""
-        for match in (Match(*row) for row in inc[0].itertuples(index=False)):
-            self.elo.add_match(match)
+        games_increment = inc[0]
+
+        if not self.trained:
+            self.train_ai(games_increment)
+            self.trained = True
+        else:
+            self.update_models(games_increment)
 
         upcoming_games: pd.DataFrame = opps[opps["Date"] == summary.iloc[0]["Date"]]
 
@@ -62,3 +71,23 @@ class Model:
             ]
 
         return data_matrix
+
+    def train_ai(self, dataframe: pd.DataFrame) -> None:
+        """Train AI."""
+        train_matrix = np.ndarray([dataframe.shape[0], 5])
+
+        for match in (Match(*x) for x in dataframe.itertuples()):
+            self.elo.add_match(match)
+
+            home_elo = self.elo.teams[match.HID].rating
+            away_elo = self.elo.teams[match.AID].rating
+
+            train_matrix[match.Index] = [
+                home_elo,
+                away_elo,
+                match.OddsH,
+                match.OddsA,
+                match.H,
+            ]
+
+        self.ai.train(train_matrix)
