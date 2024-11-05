@@ -8,6 +8,7 @@ type Team = int
 Match = namedtuple(
     "Match",
     [
+        "Index",
         "GameID",
         "Season",
         "Date",

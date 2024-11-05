@@ -1,8 +1,11 @@
 import sys
+from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from quant.models.Elo import Elo
+from quant.predict import Ai
 from quant.types import Match
 
 
@@ -12,10 +15,33 @@ def main(data_path: str, model_path: str) -> None:
 
     model = Elo()
 
-    for match in dataframe.itertuples(index=False, name="Match"):
-        model.add_match(Match(*match))
+    ai = Ai.untrained()
 
-    print(model)
+    train_matrix = np.ndarray([dataframe.shape[0], 5])
+
+    results = []
+
+    for match in (Match(*x) for x in dataframe.itertuples()):
+        model.add_match(match)
+
+        home_elo = model.teams[match.HID].rating
+        away_elo = model.teams[match.AID].rating
+
+        results.append((home_elo > away_elo) == (match.H > match.A))
+
+        train_matrix[match.Index] = [
+            home_elo,
+            away_elo,
+            match.OddsH,
+            match.OddsA,
+            match.H,
+        ]
+
+    ai.train(train_matrix)
+
+    ai.save_model(Path(model_path))
+
+    print(sum(results) / len(results))
 
 
 if __name__ == "__main__":

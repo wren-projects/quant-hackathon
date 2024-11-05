@@ -76,13 +76,13 @@ class Player:
 
     def get_betting_strategy(
         self,
-        probabbilities: np.ndarray,
+        probabilities: np.ndarray,
         active_matches: pd.DataFrame,
         summary: pd.DataFrame,
     ) -> list:
         """Return absolute cash numbers and on what to bet in 2d list."""
         proportions = self.get_bet_proportions(
-            probabbilities, active_matches, summary, 0.001
+            probabilities, active_matches, summary, 0.001
         )
         bets = [[0] * 2 for _ in range(len(proportions))]
         for i in range(len(proportions)):
