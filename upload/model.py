@@ -131,12 +131,18 @@ class Player:
         total_var = 0
         for i in range(len(probabilities)):
             for j in range(len(probabilities[i])):
-                probability = probabilities[i][j]  # First column is for win, second column is for loss
+                probability = probabilities[i][
+                    j
+                ]  # First column is for win, second column is for loss
                 ratio = ratios[i][j]  # Use the ratio corresponding to the win scenario
                 # Access flattened array index
                 prop_of_budget = proportions[i * len(probabilities[i]) + j]
-                total_profit += self.get_expected_profit(probability, ratio, prop_of_budget)
-                total_var += self.get_variance_of_profit(probability, ratio, prop_of_budget)
+                total_profit += self.get_expected_profit(
+                    probability, ratio, prop_of_budget
+                )
+                total_var += self.get_variance_of_profit(
+                    probability, ratio, prop_of_budget
+                )
         """
         for prob_row, ratios_row, proportion in zip(probabilities, ratios, proportions):
             print(prob_row, ratios_row, proportion)
@@ -187,11 +193,16 @@ class Player:
         print(ratios)
         initial_props = np.full_like(probabilities, 0.01, dtype=float)
 
-         # Constraint: sum of all props <= 1 (global budget constraint for entire 2D array)
-        cons = [{'type': 'ineq', 'fun': lambda props: 1.0 - sum(props)}]  # Global budget constraint
+        # Constraint: sum of all props <= 1 (global budget constraint for entire 2D array)
+        cons = [
+            {"type": "ineq", "fun": lambda props: 1.0 - sum(props)}
+        ]  # Global budget constraint
 
         # Bounds: Each proportion must be between 0 and 1
-        bounds = [(0, (summary.Max_bet / summary.Bankroll)) for _ in range(probabilities.shape[0] * probabilities.shape[1])]
+        bounds = [
+            (0, (summary.Max_bet / summary.Bankroll))
+            for _ in range(probabilities.shape[0] * probabilities.shape[1])
+        ]
 
         # Flatten the props for optimization and define the bounds
         initial_props_flat = initial_props.flatten()
@@ -200,9 +211,9 @@ class Player:
             self.min_function,
             initial_props_flat,
             args=(probabilities, ratios),
-            method='SLSQP',
+            method="SLSQP",
             bounds=bounds,
-            constraints=cons
+            constraints=cons,
         )
         print(np.array(result.x).reshape(probabilities.shape))
         return np.array(result.x).reshape(probabilities.shape)
@@ -214,7 +225,10 @@ class Player:
         summary: Summary,
     ) -> list:
         """Return absolute cash numbers and on what to bet in 2d list."""
-        proportions: list[float] = self.get_bet_proportions(probabilities, active_matches, summary) * summary.Bankroll
+        proportions: list[float] = (
+            self.get_bet_proportions(probabilities, active_matches, summary)
+            * summary.Bankroll
+        )
         return np.array(proportions).round(decimals=0)
 
 
@@ -345,9 +359,11 @@ class Model:
             data_matrix = self.create_data_matrix(upcoming_games)
 
             probabilities = self.ai.get_probabilities(data_matrix)
-            #probabilities = probabilities * 0.5 + 0.25
+            # probabilities = probabilities * 0.5 + 0.25
             print(probabilities)
-            bets = self.player.get_betting_strategy(probabilities, upcoming_games, summary)
+            bets = self.player.get_betting_strategy(
+                probabilities, upcoming_games, summary
+            )
 
         else:
             bets = []
@@ -356,10 +372,10 @@ class Model:
             columns=pd.Index(["BetH", "BetA"], dtype="str"),
             index=upcoming_games.index,
         )
-        
+
         print(bets)
         new_bets = new_bets.reindex(opps.index, fill_value=0)
-        #print(new_bets)
+        # print(new_bets)
         return new_bets
 
     def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
