@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol, TypeAlias
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+from scipy.optimize import minimize
 from sklearn import metrics, model_selection
 
 if TYPE_CHECKING:
@@ -122,31 +123,33 @@ class Player:
         """Return total sharpe ratio."""
         return total_profit / math.sqrt(total_var) if total_var > 0 else float("inf")
 
-    def max_function(
+    def min_function(
         self, proportions: np.ndarray, probabilities: np.ndarray, ratios: np.ndarray
     ) -> float:
         """We are trying to minimize this function for sharpe ratio."""
         total_profit = 0
         total_var = 0
-
+        for i in range(len(probabilities)):
+            for j in range(len(probabilities[i])):
+                probability = probabilities[i][j]  # First column is for win, second column is for loss
+                ratio = ratios[i][j]  # Use the ratio corresponding to the win scenario
+                # Access flattened array index
+                prop_of_budget = proportions[i * len(probabilities[i]) + j]
+                total_profit += self.get_expected_profit(probability, ratio, prop_of_budget)
+                total_var += self.get_variance_of_profit(probability, ratio, prop_of_budget)
+        """
         for prob_row, ratios_row, proportion in zip(probabilities, ratios, proportions):
             print(prob_row, ratios_row, proportion)
             for probability, ratio in zip(prob_row, ratios_row):
-                if len(prob_row) != 2 or len(ratios) != len(probabilities):
-                    print(ratios, probabilities, proportions)
-                    print("min_funciton, wrong format of probs")
+            """
 
-                total_profit += self.get_expected_profit(probability, ratio, proportion)
-                total_var += self.get_variance_of_profit(probability, ratio, proportion)
-
-        return self.sharpe_ratio(total_profit, total_var)
+        return -self.sharpe_ratio(total_profit, total_var)
 
     def get_bet_proportions(
         self,
         probabilities: np.ndarray,
         active_matches: pd.DataFrame,
         summary: Summary,
-        steps: int,
     ) -> np.ndarray:
         """
         Return proportions of the budget to bet on given probs.
@@ -161,6 +164,7 @@ class Player:
             2d numpy array of proportions with shape (num_bets, 2).
 
         """
+        """
         num_bets = probabilities.shape[0] * probabilities.shape[1]
 
         possible_ranges: list[np.ndarray] = [
@@ -173,13 +177,35 @@ class Player:
         best_sharpe = -np.inf
         best_allocation = None
         for props in product(*possible_ranges):
-            print(f"{props = }")
+            # print(f"{props = }")
             sharpe = self.max_function(np.array(props), probabilities, ratios)
             if sharpe > best_sharpe:
                 best_sharpe = sharpe
                 best_allocation = props
+        """
+        ratios = np.array(active_matches[["OddsH", "OddsA"]])
+        print(ratios)
+        initial_props = np.full_like(probabilities, 0.01, dtype=float)
 
-        return np.array(best_allocation).reshape(probabilities.shape)
+         # Constraint: sum of all props <= 1 (global budget constraint for entire 2D array)
+        cons = [{'type': 'ineq', 'fun': lambda props: 1.0 - sum(props)}]  # Global budget constraint
+
+        # Bounds: Each proportion must be between 0 and 1
+        bounds = [(0, (summary.Max_bet / summary.Bankroll)) for _ in range(probabilities.shape[0] * probabilities.shape[1])]
+
+        # Flatten the props for optimization and define the bounds
+        initial_props_flat = initial_props.flatten()
+        # Objective function minimization
+        result = minimize(
+            self.min_function,
+            initial_props_flat,
+            args=(probabilities, ratios),
+            method='SLSQP',
+            bounds=bounds,
+            constraints=cons
+        )
+        print(result.x)
+        return np.array(result.x).reshape(probabilities.shape)
 
     def get_betting_strategy(
         self,
@@ -188,10 +214,8 @@ class Player:
         summary: Summary,
     ) -> list:
         """Return absolute cash numbers and on what to bet in 2d list."""
-        return (
-            self.get_bet_proportions(probabilities, active_matches, summary, 10)
-            * summary.Bankroll
-        )
+        proportions: list[float] = self.get_bet_proportions(probabilities, active_matches, summary) * summary.Bankroll
+        return np.array(proportions).round(decimals=0)
 
 
 class TeamElo:
@@ -304,6 +328,7 @@ class Model:
         inc: tuple[pd.DataFrame, pd.DataFrame],
     ) -> pd.DataFrame:
         """Run main function."""
+        print("new round")
         games_increment = inc[0]
 
         if not self.trained:
@@ -315,18 +340,27 @@ class Model:
         summary = Summary(*summ.iloc[0])
 
         upcoming_games: pd.DataFrame = opps[opps["Date"] == summary.Date]
+        if upcoming_games.shape[0] != 0:
 
-        data_matrix = self.create_data_matrix(upcoming_games)
+            data_matrix = self.create_data_matrix(upcoming_games)
 
-        probabilities = self.ai.get_probabilities(data_matrix)
-        bets = self.player.get_betting_strategy(probabilities, opps, summary)
+            probabilities = self.ai.get_probabilities(data_matrix)
+            probabilities = probabilities * 0.5 + 0.25
+            print(probabilities)
+            bets = self.player.get_betting_strategy(probabilities, upcoming_games, summary)
 
+        else:
+            bets = []
         new_bets = pd.DataFrame(
             data=bets,
             columns=pd.Index(["BetH", "BetA"], dtype="str"),
             index=upcoming_games.index,
         )
-        return new_bets.reindex(opps.index, fill_value=0)
+        
+        print(bets)
+        new_bets = new_bets.reindex(opps.index, fill_value=0)
+        #print(new_bets)
+        return new_bets
 
     def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
         """Get matches to predict outcome for."""
@@ -334,9 +368,11 @@ class Model:
 
         upcoming_games = upcoming_games.reset_index(drop=True)
 
+        """"
         for match in upcoming_games.itertuples(index=True):
             print(match)
             print(Opp(*match))
+        """
 
         for match in (Opp(*row) for row in upcoming_games.itertuples(index=True)):
             home_elo = self.elo.teams[match.HID].rating
