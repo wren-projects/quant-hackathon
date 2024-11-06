@@ -204,7 +204,7 @@ class Player:
             bounds=bounds,
             constraints=cons
         )
-        print(result.x)
+        print(np.array(result.x).reshape(probabilities.shape))
         return np.array(result.x).reshape(probabilities.shape)
 
     def get_betting_strategy(
@@ -345,7 +345,7 @@ class Model:
             data_matrix = self.create_data_matrix(upcoming_games)
 
             probabilities = self.ai.get_probabilities(data_matrix)
-            probabilities = probabilities * 0.5 + 0.25
+            #probabilities = probabilities * 0.5 + 0.25
             print(probabilities)
             bets = self.player.get_betting_strategy(probabilities, upcoming_games, summary)
 
@@ -441,7 +441,7 @@ class Ai:
 
     def get_probabilities(self, data_matrix: np.ndarray) -> np.ndarray:
         """Get probabilities for match outcome [home_loss, home_win]."""
-        return self.model.predict_proba(data_matrix)
+        return np.array(self.model.predict_proba(data_matrix))[:, ::-1]
 
     def save_model(self, path: os.PathLike) -> None:
         """Save ML model."""
