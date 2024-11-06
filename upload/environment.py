@@ -1,28 +1,26 @@
-from typing import Optional
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
 
 class IModel:
-    def place_bets(self, summary: pd.DataFrame, opps: pd.DataFrame, inc: pd.DataFrame):
+    def place_bets(
+        self, summary: pd.DataFrame, opps: pd.DataFrame, inc: pd.DataFrame
+    ) -> pd.DataFrame:
         raise NotImplementedError
 
 
 class Environment:
-
     result_cols = ["H", "A"]
-
     odds_cols = ["OddsH", "OddsA"]
-
     bet_cols = ["BetH", "BetA"]
-
     score_cols = ["HSC", "ASC"]
 
     # fmt: off
     feature_cols = [
-        "HFGM", "AFGM", "HFGA", "AFGA", "HFG3M", "AFG3M", "HFG3A", "AFG3A",
-        "HFTM", "AFTM", "HFTA", "AFTA", "HORB", "AORB", "HDRB", "ADRB", "HRB", "ARB", "HAST",
+        "HFGM", "AFGM", "HFGA", "AFGA", "HFG3M", "AFG3M", "HFG3A", "AFG3A", "HFTM",
+        "AFTM", "HFTA", "AFTA", "HORB", "AORB", "HDRB", "ADRB", "HRB", "ARB", "HAST",
         "AAST", "HSTL", "ASTL", "HBLK", "ABLK", "HTOV", "ATOV", "HPF", "APF",
     ]
     # fmt: on
@@ -32,13 +30,12 @@ class Environment:
         games: pd.DataFrame,
         players: pd.DataFrame,
         model: IModel,
-        start_date: Optional[pd.Timestamp] = None,
-        end_date: Optional[pd.Timestamp] = None,
-        init_bankroll=1000.0,
+        start_date: pd.Timestamp | None = None,
+        end_date: pd.Timestamp | None = None,
+        init_bankroll: float = 1000.0,
         min_bet=0,
         max_bet=np.inf,
     ):
-
         self.games = games
         self.players = players
         self.games[self.bet_cols] = 0.0
@@ -63,7 +60,6 @@ class Environment:
     def run(self):
         print(f"Start: {self.start_date}, End: {self.end_date}")
         for date in pd.date_range(self.start_date, self.end_date):
-
             # get results from previous day(s) and evaluate bets
             inc = self._next_date(date)
 
@@ -88,8 +84,7 @@ class Environment:
 
     def get_history(self):
         history = pd.DataFrame(data=self.history)
-        history = history.set_index("Date")
-        return history
+        return history.set_index("Date")
 
     def _next_date(self, date: pd.Timestamp):
         games = self.games.loc[
@@ -147,7 +142,7 @@ class Environment:
 
         return validated_bets
 
-    def _place_bets(self, date: pd.Timestamp, bets: pd.DataFrame):
+    def _place_bets(self, date: pd.Timestamp, bets: pd.DataFrame) -> None:
         # print("Placing bets")
         self.games.loc[bets.index, self.bet_cols] = self.games.loc[
             bets.index, self.bet_cols
@@ -158,7 +153,7 @@ class Environment:
 
         self._save_state(date + pd.Timedelta(23, unit="h"), bets.values.sum())
 
-    def _generate_summary(self, date: pd.Timestamp):
+    def _generate_summary(self, date: pd.Timestamp) -> pd.DataFrame:
         summary = {
             "Bankroll": self.bankroll,
             "Date": date,
@@ -167,7 +162,7 @@ class Environment:
         }
         return pd.Series(summary).to_frame().T
 
-    def _save_state(self, date: pd.Timestamp, cash_invested: float):
+    def _save_state(self, date: pd.Timestamp, cash_invested: float) -> None:
         self.history["Date"].append(date)
         self.history["Bankroll"].append(self.bankroll)
         self.history["Cash_Invested"].append(cash_invested)
