@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import math
-import sys
 from collections import namedtuple
 from itertools import product
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
@@ -15,9 +13,7 @@ from sklearn import metrics, model_selection
 if TYPE_CHECKING:
     import os
 
-
 type Team = int
-
 
 Match = namedtuple(
     "Match",
@@ -66,7 +62,6 @@ Match = namedtuple(
     ],
 )
 
-
 Opp = namedtuple(
     "Opp",
     [
@@ -81,6 +76,16 @@ Opp = namedtuple(
         "OddsA",
         "BetH",
         "BetA",
+    ],
+)
+
+Summary = namedtuple(
+    "Summary",
+    [
+        "Bankroll",
+        "Date",
+        "Min_bet",
+        "Max_bet",
     ],
 )
 
@@ -101,91 +106,91 @@ class Player:
     """Handles betting strateggy."""
 
     def get_expected_profit(
-        self, prob: float, ratio: float, prop_of_budget: float
+        self, probability: float, ratio: float, proportion: float
     ) -> float:
-        """Get expected profit for given parametrs."""
-        return (prob * ratio - 1) * prop_of_budget
+        """Calculate the expected profit for given parametrs."""
+        return (probability * ratio - 1) * proportion
 
     def get_variance_of_profit(
-        self, prob: float, ratio: float, prop_of_budget: float
+        self, probability: float, ratio: float, proportion: float
     ) -> float:
-        """Get varience of profit for given parameters."""
-        return (1 - prob) * prob * (prop_of_budget**2) * (ratio**2)
+        """Calculate the variance of profit for given parameters."""
+        return (1 - probability) * probability * (proportion**2) * (ratio**2)
 
     def sharpe_ratio(self, total_profit: float, total_var: float) -> float:
-        """Return total sharp ratio."""
-        if total_var == 0:
-            return np.inf
-        return total_profit / math.sqrt(total_var)
+        """Return total sharpe ratio."""
+        return total_profit / math.sqrt(total_var) if total_var > 0 else float("inf")
 
     def max_function(
-        self, props: np.ndarray, probs: np.ndarray, ratios: np.ndarray
+        self, proportions: np.ndarray, probabilities: np.ndarray, ratios: np.ndarray
     ) -> float:
-        """We are trying to minimaze this function for sharp ratio."""
+        """We are trying to minimize this function for sharpe ratio."""
         total_profit = 0
         total_var = 0
-        for i in range(len(probs)):
-            for j in range(2):
-                prob = probs[i][j]
-                ratio = ratios[i][j]
-                prop_of_budget = props[i * len(probs[i]) + j]
-                if len(probs[i]) != 2 or len(ratios) != len(probs):
+
+        for prob_row, ratios_row, proportion in zip(probabilities, ratios, proportions):
+            print(prob_row, ratios_row, proportion)
+            for probability, ratio in zip(prob_row, ratios_row):
+                if len(prob_row) != 2 or len(ratios) != len(probabilities):
+                    print(ratios, probabilities, proportions)
                     print("min_funciton, wrong format of probs")
-                total_profit += self.get_expected_profit(prob, ratio, prop_of_budget)
-                total_var += self.get_variance_of_profit(prob, ratio, prop_of_budget)
+
+                total_profit += self.get_expected_profit(probability, ratio, proportion)
+                total_var += self.get_variance_of_profit(probability, ratio, proportion)
+
         return self.sharpe_ratio(total_profit, total_var)
 
     def get_bet_proportions(
         self,
-        probs: np.ndarray,
+        probabilities: np.ndarray,
         active_matches: pd.DataFrame,
-        summary: pd.DataFrame,
-        step: float,
+        summary: Summary,
+        steps: int,
     ) -> np.ndarray:
-        """Return proportions of the budget to bet on speific probs(in the same format as probs)."""
-        num_bets = probs.shape[0] * probs.shape[1]
-        possible_ranges = []
-        for _ in range(num_bets):
-            min_bound = summary.iloc[0]["Min_bet"] / summary.iloc[0]["Bankroll"]
-            max_bound = summary.iloc[0]["Max_bet"] / summary.iloc[0]["Bankroll"]
-            possible_ranges.append(
-                [0, *list(np.arange(min_bound, max_bound + step, step))]
-            )
+        """
+        Return proportions of the budget to bet on given probs.
 
-        all_combinations = product(*possible_ranges)
+        Args:
+            probabilities: 2d numpy array of probabilities.
+            active_matches: DataFrame with active matches.
+            summary: Summary of the game state.
+            steps: number of steps to discretize the budget.
+
+        Returns:
+            2d numpy array of proportions with shape (num_bets, 2).
+
+        """
+        num_bets = probabilities.shape[0] * probabilities.shape[1]
+
+        possible_ranges: list[np.ndarray] = [
+            np.linspace(summary.Min_bet, summary.Max_bet, steps) / summary.Bankroll
+            for _ in range(num_bets)
+        ]
+
+        ratios = np.array(active_matches[["OddsH", "OddsA"]])
+
         best_sharpe = -np.inf
         best_allocation = None
-        for props in all_combinations:
-            sharpe = self.max_function(
-                np.array(props), probs, np.array(active_matches[["OddsH", "OddsA"]])
-            )
+        for props in product(*possible_ranges):
+            print(f"{props = }")
+            sharpe = self.max_function(np.array(props), probabilities, ratios)
             if sharpe > best_sharpe:
                 best_sharpe = sharpe
                 best_allocation = props
 
-        return np.array(best_allocation).reshape(probs.shape)
+        return np.array(best_allocation).reshape(probabilities.shape)
 
     def get_betting_strategy(
         self,
         probabilities: np.ndarray,
         active_matches: pd.DataFrame,
-        summary: pd.DataFrame,
+        summary: Summary,
     ) -> list:
         """Return absolute cash numbers and on what to bet in 2d list."""
-        proportions = self.get_bet_proportions(
-            probabilities, active_matches, summary, 0.001
+        return (
+            self.get_bet_proportions(probabilities, active_matches, summary, 10)
+            * summary.Bankroll
         )
-        bets = [[0] * 2 for _ in range(len(proportions))]
-        for i in range(len(proportions)):
-            for j in range(2):
-                bets[i][j] = proportions[i][j] * summary.iloc[0]["Bankroll"]
-        return bets
-
-
-# Merging elo.py
-
-
-K: int = 32
 
 
 class TeamElo:
@@ -200,6 +205,7 @@ class TeamElo:
 
     """
 
+    K: int = 32
     opponents: int
     games: int
     wins: int
@@ -227,7 +233,7 @@ class TeamElo:
 
         expected = 1 / (1 + 10 ** ((opponent - self.rating) / 400))
 
-        self.rating += int(K * (win - expected))
+        self.rating += int(self.K * (win - expected))
 
     def __str__(self) -> str:
         """Create a string representation of the team's Elo."""
@@ -272,11 +278,6 @@ class Elo(RankingModel):
         return {team: teamElo.rating / max_elo for team, teamElo in self.teams.items()}
 
 
-# Merging merged.py
-
-# Merging model.py
-
-
 class Model:
     """Main class."""
 
@@ -285,18 +286,17 @@ class Model:
         self.seen_matches = set()
         self.elo = Elo()
         self.player = Player()
-        self.ai = Ai.untrained()
+        self.ai = Ai()
         self.trained = False
 
     def update_models(self, games_increment: pd.DataFrame) -> None:
         """Update models."""
-
-        for match in (Match(*row) for row in games_increment.itertuples(index=False)):
+        for match in (Match(*row) for row in games_increment.itertuples()):
             self.elo.add_match(match)
 
     def place_bets(
         self,
-        summary: pd.DataFrame,
+        summ: pd.DataFrame,
         opps: pd.DataFrame,
         inc: tuple[pd.DataFrame, pd.DataFrame],
     ) -> pd.DataFrame:
@@ -309,7 +309,9 @@ class Model:
         else:
             self.update_models(games_increment)
 
-        upcoming_games: pd.DataFrame = opps[opps["Date"] == summary.iloc[0]["Date"]]
+        summary = Summary(*summ.iloc[0])
+
+        upcoming_games: pd.DataFrame = opps[opps["Date"] == summary.Date]
 
         data_matrix = self.create_data_matrix(upcoming_games)
 
@@ -348,11 +350,9 @@ class Model:
 
     def train_ai(self, dataframe: pd.DataFrame) -> None:
         """Train AI."""
-
         train_matrix = np.ndarray([dataframe.shape[0], 5])
 
         for match in (Match(*x) for x in dataframe.itertuples()):
-
             self.elo.add_match(match)
 
             home_elo = self.elo.teams[match.HID].rating
@@ -378,19 +378,9 @@ class Ai:
 
     model: xgb.XGBClassifier
 
-    def __init__(self, model: xgb.XGBClassifier):
+    def __init__(self):
         """Create a new Model from a XGBClassifier."""
-        self.model = model
-
-    @staticmethod
-    def untrained() -> Ai:
-        """Get model type."""
-        return Ai(xgb.XGBClassifier())
-
-    @staticmethod
-    def load_from_file(path: os.PathLike) -> Ai:
-        """Load model from given file path."""
-        return Ai(xgb.XGBClassifier.load_model(path))
+        self.model = xgb.XGBClassifier()
 
     def train(self, train_matrix: np.ndarray) -> None:
         """Return trained model."""
@@ -414,52 +404,3 @@ class Ai:
     def save_model(self, path: os.PathLike) -> None:
         """Save ML model."""
         self.model.save_model(path)
-
-
-# Merging types_1.py
-
-
-# Merging __init__.py
-
-# Merging __main__.py
-
-
-def main(data_path: str, model_path: str) -> None:
-    """Start testing run."""
-    dataframe = pd.read_csv(data_path)
-
-    model = Elo()
-
-    ai = Ai.untrained()
-
-    train_matrix = np.ndarray([dataframe.shape[0], 5])
-
-    results = []
-
-    for match in (Match(*x) for x in dataframe.itertuples()):
-        model.add_match(match)
-
-        home_elo = model.teams[match.HID].rating
-        away_elo = model.teams[match.AID].rating
-
-        results.append((home_elo > away_elo) == (match.H > match.A))
-
-        train_matrix[match.Index] = [
-            home_elo,
-            away_elo,
-            match.OddsH,
-            match.OddsA,
-            match.H,
-        ]
-
-    ai.train(train_matrix)
-
-    ai.save_model(Path(model_path))
-
-    print(sum(results) / len(results))
-
-
-if __name__ == "__main__":
-    data_path = sys.argv[1] if len(sys.argv) > 1 else "quant/datasets/games.csv"
-    model_path = sys.argv[2] if len(sys.argv) > 2 else "quant/models/model.json"
-    main(data_path, model_path)
