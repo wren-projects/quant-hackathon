@@ -3,9 +3,11 @@ from __future__ import annotations
 import math
 from collections import namedtuple
 from enum import IntEnum
+from copy import deepcopy
 from itertools import product
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xgboost as xgb
@@ -90,6 +92,80 @@ Summary = namedtuple(
         "Max_bet",
     ],
 )
+
+
+def plot_bad_predictions(Y_true, probabilities):
+    # Ensure input is a numpy array for consistent processing
+    Y_true = np.array(Y_true)
+    probabilities = np.array(probabilities)
+
+    # Create a DataFrame for analysis
+    df = pd.DataFrame({"Y_true": Y_true, "probabilities": probabilities})
+
+    # Define bins for grouping probabilities by tens
+    bins = np.arange(0, 1.05, 0.05)
+    labels = [f"{b:.2f}-{b+0.05:.02f}" for b in bins[:-1]]
+
+    # Categorize probabilities into bins
+    df["probability_group"] = pd.cut(
+        df["probabilities"], bins=bins, labels=labels, include_lowest=True
+    )
+
+    # Calculate total instances and bad predictions
+    total_instances = df.groupby("probability_group").size()
+    bad_predictions = df.groupby("probability_group").apply(
+        lambda x: (
+            (
+                (x["Y_true"] == 1) & (x["probabilities"] < 0.5)
+            ).sum()  # True class 1, predicted low
+            + (
+                (x["Y_true"] == 0) & (x["probabilities"] >= 0.5)
+            ).sum()  # True class 0, predicted high
+        )
+    )
+
+    # Calculate the probability of being badly classified
+    bad_classification_probability = bad_predictions / total_instances
+
+    # Prepare data for plotting
+    bad_classification_probability = bad_classification_probability.reset_index(
+        name="bad_classification_prob"
+    )
+    bad_classification_probability["total_count"] = (
+        total_instances.values
+    )  # Add total counts
+
+    # Plotting
+    # Plotting
+    plt.figure(figsize=(10, 6))
+
+    bars = plt.bar(
+        bad_classification_probability["probability_group"],
+        bad_classification_probability["bad_classification_prob"],
+        color="orange",
+    )
+
+    plt.xlabel("Probability Groups (5% Intervals)")
+    plt.ylabel("Probability of Being Badly Classified")
+    plt.title("Probability of Bad Classification by Probability Group (Grouped by 5%)")
+    plt.xticks(rotation=45)
+    plt.ylim(0, 1)
+
+    # Adding counts on top of bars
+    for bar, count in zip(bars, bad_classification_probability["total_count"]):
+        yval = bar.get_height()
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            yval,
+            f"{count}",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            color="black",
+        )
+
+    plt.tight_layout()
+    plt.show()
 
 
 class RankingModel(Protocol):
@@ -244,7 +320,7 @@ class TeamElo:
 
     """
 
-    K: int = 32
+    K: int = 30
     opponents: int
     games: int
     wins: int
@@ -316,6 +392,10 @@ class Elo(RankingModel):
         max_elo = max(elo.rating for elo in self.teams.values())
         return {team: teamElo.rating / max_elo for team, teamElo in self.teams.items()}
 
+    def team_rating(self, team_id: int) -> float:
+        """Return Elo rating of a team."""
+        return self.teams.setdefault(team_id, TeamElo()).rating
+
 
 class Model:
     """Main class."""
@@ -354,16 +434,17 @@ class Model:
         summary = Summary(*summ.iloc[0])
 
         upcoming_games: pd.DataFrame = opps[opps["Date"] == summary.Date]
-        if upcoming_games.shape[0] != 0:
 
+        if upcoming_games.shape[0] != 0:
             data_matrix = self.create_data_matrix(upcoming_games)
 
             probabilities = self.ai.get_probabilities(data_matrix)
             # probabilities = probabilities * 0.5 + 0.25
             print(probabilities)
-            bets = self.player.get_betting_strategy(
+            """bets = self.player.get_betting_strategy(
                 probabilities, upcoming_games, summary
-            )
+            )"""
+            bets = self.put_max_bet(probabilities, upcoming_games, summary)
 
         else:
             bets = []
@@ -377,6 +458,27 @@ class Model:
         new_bets = new_bets.reindex(opps.index, fill_value=0)
         # print(new_bets)
         return new_bets
+
+    def put_max_bet(
+        self, probabilities: np.ndarray, upcoming_games: Match, summary: Summary
+    ) -> np.ndarray:
+        ratio_cut_off = 1.1
+        budget = summary.Bankroll / 4
+        binary_bets = (probabilities).round(decimals=0)
+        ratios = deepcopy(np.array(upcoming_games[["OddsH", "OddsA"]]))
+        print(ratios)
+        for i in range(len(ratios)):
+            for j in range(2):
+                if ratios[i][j] > ratio_cut_off:
+                    ratios[i][j] = 1
+                else:
+                    ratios[i][j] = 0
+        print(ratios)
+        binary_bets = binary_bets * ratios
+        num_of_bets = np.count_nonzero(binary_bets)
+        bet = min(budget / num_of_bets, summary.Max_bet)
+        bets = binary_bets * bet
+        return bets
 
     def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
         """Get matches to predict outcome for."""
@@ -409,13 +511,8 @@ class Model:
         train_matrix = np.ndarray([dataframe.shape[0], 5])
 
         for match in (Match(*x) for x in dataframe.itertuples()):
-            self.elo.add_match(match)
-
-            home_id: TeamID = match.HID
-            away_id: TeamID = match.AID
-
-            home_elo = self.elo.teams[home_id].rating
-            away_elo = self.elo.teams[away_id].rating
+            home_elo = self.elo.team_rating(match.HID)
+            away_elo = self.elo.team_rating(match.AID)
 
             train_matrix[match.Index] = [
                 home_elo,
@@ -427,6 +524,7 @@ class Model:
             ]
 
             self.data.add_match(match)
+            self.elo.add_match(match)
 
         self.ai.train(train_matrix)
 
@@ -442,18 +540,39 @@ class Ai:
 
     def train(self, train_matrix: np.ndarray) -> None:
         """Return trained model."""
+        len_t = len(train_matrix)
+        print(f"len of training data {len_t}")
         x_train, x_val, y_train, y_val = model_selection.train_test_split(
-            train_matrix[:, :-1],
-            train_matrix[:, -1],
+            train_matrix[:-600, :-1],
+            train_matrix[:-600, -1],
             test_size=0.1,
             random_state=6,
         )
         self.model.fit(x_train, y_train)
-        probabilities = self.model.predict_proba(x_val)
-        predictions = self.model.predict(x_val)
+        probabilities = self.model.predict_proba(train_matrix[-600:, :-1])
+        predictions = self.model.predict(train_matrix[-600:, :-1])
         prob = [probabilities[i][pred] for i, pred in enumerate(predictions)]
-        print("Accuracy:", metrics.accuracy_score(y_val, predictions))
+        print("Accuracy:", metrics.accuracy_score(train_matrix[-600:, -1], predictions))
+
+        fpr, fnr, _ = metrics.det_curve(train_matrix[-600:, -1], probabilities[:, -1])
         print("Average confidence:", sum(prob) / len(prob))
+        plot_bad_predictions(train_matrix[-600:, -1], probabilities[:, -1])
+
+        cm = metrics.confusion_matrix(
+            train_matrix[-600:, -1], predictions, labels=self.model.classes_
+        )
+        disp = metrics.ConfusionMatrixDisplay(
+            confusion_matrix=cm, display_labels=self.model.classes_
+        )
+        disp.plot()
+
+        plt.show()
+
+        """
+        display = metrics.DetCurveDisplay(fpr=fpr, fnr=fnr, estimator_name="xgboost")
+        display.plot()
+        plt.show()
+        """
 
     def get_probabilities(self, data_matrix: np.ndarray) -> np.ndarray:
         """Get probabilities for match outcome [home_loss, home_win]."""
