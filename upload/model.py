@@ -301,7 +301,8 @@ class TeamElo:
 
     """
 
-    K: int = 30
+    K: int = 400
+    A: int = 200
     opponents: int
     games: int
     wins: int
@@ -327,7 +328,7 @@ class TeamElo:
         self.games += 1
         self.wins += 1 if win else 0
 
-        expected = 1 / (1 + 10 ** ((opponent - self.rating) / 400))
+        expected = 1 / (1 + 10 ** ((opponent - self.rating) / self.A))
 
         self.rating += int(self.K * (win - expected))
 
@@ -465,7 +466,7 @@ class Model:
 
     def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
         """Get matches to predict outcome for."""
-        data_matrix = np.ndarray([upcoming_games.shape[0], 4])
+        data_matrix = np.ndarray([upcoming_games.shape[0], 2])
 
         upcoming_games = upcoming_games.reset_index(drop=True)
 
@@ -480,6 +481,9 @@ class Model:
                 match.OddsA,
                 *self.data.get_match_array(match),
             ]
+
+            """match.OddsH,
+                match.OddsA"""
 
         return data_matrix
 
@@ -507,7 +511,7 @@ class Model:
 
     def train_ai_reg(self, dataframe: pd.DataFrame) -> None:
         """Train AI."""
-        train_matrix = np.ndarray([dataframe.shape[0], 5])
+        train_matrix = np.ndarray([dataframe.shape[0], 3])
 
         for match in (Match(*x) for x in dataframe.itertuples()):
             home_elo = self.elo.team_rating(match.HID)
@@ -516,14 +520,50 @@ class Model:
             train_matrix[match.Index] = [
                 home_elo,
                 away_elo,
-                match.OddsH,
-                match.OddsA,
                 match.HSC - match.ASC,
             ]
+
+            """                match.OddsH,
+                match.OddsA,"""
 
             self.elo.add_match(match)
 
         self.ai.train_reg(train_matrix)
+
+
+def calculate_elo_accuracy(data):
+    """
+    Calculate the accuracy of ELO predictions.
+
+    Parameters:
+    data (list of lists): A 2D array where each inner list contains:
+                          [ELO_home, ELO_away, outcome].
+                          Outcome is 1 for home win and 0 for away win.
+
+    Returns:
+    float: The accuracy of the ELO predictions as a percentage.
+    """
+    # Return 0 if the input data is empty
+
+    correct_predictions = 0
+    total_games = len(data)
+    games = np.array(data)[:, :-1]
+    outcomes = np.array(data)[:, -1].clip(0, 1).round(decimals=0)
+    for i in range(len(data)):
+        elo_home = games[i][0]
+        elo_away = games[i][1]
+        outcome = outcomes[i]
+
+        # Predict home win if home ELO is greater than away ELO
+        predicted_outcome = 1 if elo_home > elo_away else 0
+
+        # Compare predicted outcome with actual outcome
+        if predicted_outcome == outcome:
+            correct_predictions += 1
+
+    # Calculate accuracy as a percentage
+    accuracy = correct_predictions / total_games
+    return accuracy
 
 
 class Ai:
@@ -616,6 +656,13 @@ class Ai:
             confusion_matrix=cm, display_labels=[0, 1]
         )
         disp.plot()
+
+        print(
+            "just home: ",
+            train_matrix[-600:, -1].clip(0, 1).round(decimals=0).sum() / 600,
+        )
+        print("ELO accuracy:", calculate_elo_accuracy(train_matrix[-600:, :]))
+
         plt.show()
 
     def get_probabilities(self, data_matrix: np.ndarray) -> np.ndarray:
