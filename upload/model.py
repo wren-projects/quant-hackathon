@@ -406,7 +406,7 @@ class Model:
         games_increment = inc[0]
 
         if not self.trained:
-            self.train_ai(games_increment)
+            self.train_ai_reg(games_increment)
             self.trained = True
         else:
             self.update_models(games_increment)
@@ -418,7 +418,7 @@ class Model:
         if upcoming_games.shape[0] != 0:
             data_matrix = self.create_data_matrix(upcoming_games)
 
-            probabilities = self.ai.get_probabilities(data_matrix)
+            probabilities = self.ai.get_probabilities_reg(data_matrix)
             # probabilities = probabilities * 0.5 + 0.25
             print(probabilities)
 
@@ -581,6 +581,21 @@ class Ai:
             "RMSE:",
             math.sqrt(metrics.mean_squared_error(train_matrix[-600:, -1], predictions)),
         )
+        print("MAE:", metrics.mean_absolute_error(train_matrix[-600:, -1], predictions))
+        probabilities = self.calculate_probabilities(predictions)
+        plot_bad_predictions(
+            train_matrix[-600:, -1].clip(0, 1).round(decimals=0), probabilities[:, -1]
+        )
+        cm = metrics.confusion_matrix(
+            train_matrix[-600:, -1].clip(0, 1).round(decimals=0),
+            probabilities[:, -1].round(decimals=0),
+            labels=[0, 1],
+        )
+        disp = metrics.ConfusionMatrixDisplay(
+            confusion_matrix=cm, display_labels=[0, 1]
+        )
+        disp.plot()
+        plt.show()
 
     def get_probabilities(self, data_matrix: np.ndarray) -> np.ndarray:
         """Get probabilities for match outcome [home_loss, home_win]."""
@@ -589,11 +604,24 @@ class Ai:
     def get_probabilities_reg(self, data_matrix: np.ndarray) -> np.ndarray:
         """Get probabilities for match outcome [home_loss, home_win]."""
         predicted_dif_score = np.array(self.model.predict(data_matrix))
-        return
+        return self.calculate_probabilities(predicted_dif_score)[:, ::-1]
 
     def save_model(self, path: os.PathLike) -> None:
         """Save ML model."""
         self.model.save_model(path)
+
+    def home_team_win_probability(self, point_difference: float) -> float:
+        slope = 0.3
+        return 1 / (1 + np.exp(-slope * point_difference))
+
+    def calculate_probabilities(self, score_differences: np.ndarray) -> np.ndarray:
+        """Calculate the probabilities of home and away teams winning based on score differences."""
+        probabilities = np.zeros((len(score_differences), 2))
+        for i, diff in enumerate(score_differences):
+            home_prob = self.home_team_win_probability(diff)
+            away_prob = 1 - home_prob
+            probabilities[i] = [away_prob, home_prob]
+        return probabilities
 
 
 class Team(IntEnum):
