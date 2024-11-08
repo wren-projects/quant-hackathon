@@ -219,12 +219,6 @@ class Player:
                 total_var += self.get_variance_of_profit(
                     probability, ratio, prop_of_budget
                 )
-        """
-        for prob_row, ratios_row, proportion in zip(probabilities, ratios, proportions):
-            print(prob_row, ratios_row, proportion)
-            for probability, ratio in zip(prob_row, ratios_row):
-            """
-
         return -self.sharpe_ratio(total_profit, total_var)
 
     def get_bet_proportions(
@@ -245,25 +239,6 @@ class Player:
         Returns:
             2d numpy array of proportions with shape (num_bets, 2).
 
-        """
-        """
-        num_bets = probabilities.shape[0] * probabilities.shape[1]
-
-        possible_ranges: list[np.ndarray] = [
-            np.linspace(summary.Min_bet, summary.Max_bet, steps) / summary.Bankroll
-            for _ in range(num_bets)
-        ]
-
-        ratios = np.array(active_matches[["OddsH", "OddsA"]])
-
-        best_sharpe = -np.inf
-        best_allocation = None
-        for props in product(*possible_ranges):
-            # print(f"{props = }")
-            sharpe = self.max_function(np.array(props), probabilities, ratios)
-            if sharpe > best_sharpe:
-                best_sharpe = sharpe
-                best_allocation = props
         """
         ratios = np.array(active_matches[["OddsH", "OddsA"]])
         print(ratios)
@@ -441,10 +416,13 @@ class Model:
             probabilities = self.ai.get_probabilities(data_matrix)
             # probabilities = probabilities * 0.5 + 0.25
             print(probabilities)
-            """bets = self.player.get_betting_strategy(
+
+            bets = self.player.get_betting_strategy(
                 probabilities, upcoming_games, summary
-            )"""
+            )
+            """
             bets = self.put_max_bet(probabilities, upcoming_games, summary)
+            """
 
         else:
             bets = []
@@ -462,9 +440,9 @@ class Model:
     def put_max_bet(
         self, probabilities: np.ndarray, upcoming_games: Match, summary: Summary
     ) -> np.ndarray:
-        ratio_cut_off = 1.1
-        budget = summary.Bankroll / 4
-        binary_bets = (probabilities).round(decimals=0)
+        ratio_cut_off = 1.2
+        budget = summary.Bankroll / 2
+        binary_bets = (probabilities - 0.25).round(decimals=0)
         ratios = deepcopy(np.array(upcoming_games[["OddsH", "OddsA"]]))
         print(ratios)
         for i in range(len(ratios)):
@@ -485,12 +463,6 @@ class Model:
         data_matrix = np.ndarray([upcoming_games.shape[0], 4])
 
         upcoming_games = upcoming_games.reset_index(drop=True)
-
-        """"
-        for match in upcoming_games.itertuples(index=True):
-            print(match)
-            print(Opp(*match))
-        """
 
         for match in (Opp(*row) for row in upcoming_games.itertuples(index=True)):
             home_elo = self.elo.teams[match.HID].rating
@@ -565,14 +537,7 @@ class Ai:
             confusion_matrix=cm, display_labels=self.model.classes_
         )
         disp.plot()
-
         plt.show()
-
-        """
-        display = metrics.DetCurveDisplay(fpr=fpr, fnr=fnr, estimator_name="xgboost")
-        display.plot()
-        plt.show()
-        """
 
     def get_probabilities(self, data_matrix: np.ndarray) -> np.ndarray:
         """Get probabilities for match outcome [home_loss, home_win]."""
