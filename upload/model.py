@@ -7,6 +7,7 @@ from copy import deepcopy
 from itertools import product
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 
+from cv2 import normalize
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -425,9 +426,8 @@ class Model:
             bets = self.player.get_betting_strategy(
                 probabilities, upcoming_games, summary
             )
-            """
-            bets = self.put_max_bet(probabilities, upcoming_games, summary)
-            """
+
+            """bets = self.put_max_bet(probabilities, upcoming_games, summary)"""
 
         else:
             bets = []
@@ -447,7 +447,7 @@ class Model:
     ) -> np.ndarray:
         ratio_cut_off = 1.2
         budget = summary.Bankroll / 2
-        binary_bets = (probabilities - 0.25).round(decimals=0)
+        binary_bets = (probabilities - 0.3).round(decimals=0)
         ratios = deepcopy(np.array(upcoming_games[["OddsH", "OddsA"]]))
         print(ratios)
         for i in range(len(ratios)):
@@ -574,7 +574,28 @@ class Ai:
             test_size=0.01,
             random_state=6,
         )
-        self.model = xgb.XGBRegressor(objective="reg:squarederror")
+        self.model = xgb.XGBRegressor(
+            objective="reg:squarederror",
+            learning_rate=0.005,
+            n_estimators=500,
+            max_depth=5,
+        )
+
+        """
+        param_grid = {
+        'learning_rate': [0.005],
+        'n_estimators': [ 500, 800, 1000],
+        'max_depth': [3, 4 , 5, 6, 7],
+        }
+
+        grid_search = model_selection.GridSearchCV(estimator=self.model, param_grid=param_grid, scoring='neg_mean_squared_error', cv=5)
+
+        grid_search.fit(x_train, y_train)
+
+        print("Best Parameters:", grid_search.best_params_)
+        print("Best Score:", grid_search.best_score_)
+        """
+
         self.model.fit(x_train, y_train)
         predictions = self.model.predict(train_matrix[-600:, :-1])
         print(
@@ -611,7 +632,7 @@ class Ai:
         self.model.save_model(path)
 
     def home_team_win_probability(self, point_difference: float) -> float:
-        slope = 0.3
+        slope = 0.8  # range optimal 0.1 to 1. liked 0.3 and 0.5 (maybe 1)
         return 1 / (1 + np.exp(-slope * point_difference))
 
     def calculate_probabilities(self, score_differences: np.ndarray) -> np.ndarray:
