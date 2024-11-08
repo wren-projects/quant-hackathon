@@ -166,6 +166,11 @@ def plot_bad_predictions(Y_true, probabilities):
 
     plt.tight_layout()
     plt.show()
+    # Creating a DataFrame for correlation calculation
+    data = pd.DataFrame({"Y_true": Y_true, "probabilities": probabilities})
+    # Calculating the correlation
+    correlation = data.corr().iloc[0, 1]
+    print(f"corelation: {correlation}")
 
 
 class RankingModel(Protocol):
@@ -500,11 +505,31 @@ class Model:
 
         self.ai.train(train_matrix)
 
+    def train_ai_reg(self, dataframe: pd.DataFrame) -> None:
+        """Train AI."""
+        train_matrix = np.ndarray([dataframe.shape[0], 5])
+
+        for match in (Match(*x) for x in dataframe.itertuples()):
+            home_elo = self.elo.team_rating(match.HID)
+            away_elo = self.elo.team_rating(match.AID)
+
+            train_matrix[match.Index] = [
+                home_elo,
+                away_elo,
+                match.OddsH,
+                match.OddsA,
+                match.HSC - match.ASC,
+            ]
+
+            self.elo.add_match(match)
+
+        self.ai.train_reg(train_matrix)
+
 
 class Ai:
     """Class for training and predicting."""
 
-    model: xgb.XGBClassifier
+    model: xgb.XGBRegressor
 
     def __init__(self):
         """Create a new Model from a XGBClassifier."""
@@ -539,9 +564,32 @@ class Ai:
         disp.plot()
         plt.show()
 
+    def train_reg(self, train_matrix: np.ndarray) -> None:
+        """Return trained model."""
+        len_t = len(train_matrix)
+        print(f"len of training data {len_t}")
+        x_train, x_val, y_train, y_val = model_selection.train_test_split(
+            train_matrix[:-600, :-1],
+            train_matrix[:-600, -1],
+            test_size=0.01,
+            random_state=6,
+        )
+        self.model = xgb.XGBRegressor(objective="reg:squarederror")
+        self.model.fit(x_train, y_train)
+        predictions = self.model.predict(train_matrix[-600:, :-1])
+        print(
+            "RMSE:",
+            math.sqrt(metrics.mean_squared_error(train_matrix[-600:, -1], predictions)),
+        )
+
     def get_probabilities(self, data_matrix: np.ndarray) -> np.ndarray:
         """Get probabilities for match outcome [home_loss, home_win]."""
         return np.array(self.model.predict_proba(data_matrix))[:, ::-1]
+
+    def get_probabilities_reg(self, data_matrix: np.ndarray) -> np.ndarray:
+        """Get probabilities for match outcome [home_loss, home_win]."""
+        predicted_dif_score = np.array(self.model.predict(data_matrix))
+        return
 
     def save_model(self, path: os.PathLike) -> None:
         """Save ML model."""
