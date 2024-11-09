@@ -7,7 +7,6 @@ from copy import deepcopy
 from itertools import product
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 
-from cv2 import normalize
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -482,9 +481,6 @@ class Model:
                 *self.data.get_match_array(match),
             ]
 
-            """match.OddsH,
-                match.OddsA"""
-
         return data_matrix
 
     def train_ai(self, dataframe: pd.DataFrame) -> None:
@@ -520,31 +516,18 @@ class Model:
             train_matrix[match.Index] = [
                 home_elo,
                 away_elo,
+                match.OddsH,
+                match.OddsA,
                 match.HSC - match.ASC,
             ]
-
-            """                match.OddsH,
-                match.OddsA,"""
 
             self.elo.add_match(match)
 
         self.ai.train_reg(train_matrix)
 
 
-def calculate_elo_accuracy(data):
-    """
-    Calculate the accuracy of ELO predictions.
-
-    Parameters:
-    data (list of lists): A 2D array where each inner list contains:
-                          [ELO_home, ELO_away, outcome].
-                          Outcome is 1 for home win and 0 for away win.
-
-    Returns:
-    float: The accuracy of the ELO predictions as a percentage.
-    """
-    # Return 0 if the input data is empty
-
+def calculate_elo_accuracy(data: list[list[int]]) -> float:
+    """Calculate the accuracy of ELO predictions."""
     correct_predictions = 0
     total_games = len(data)
     games = np.array(data)[:, :-1]
@@ -562,8 +545,7 @@ def calculate_elo_accuracy(data):
             correct_predictions += 1
 
     # Calculate accuracy as a percentage
-    accuracy = correct_predictions / total_games
-    return accuracy
+    return correct_predictions / total_games
 
 
 class Ai:
