@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 
 from quant.data import Data
-from quant.models.Elo import Elo
 from quant.predict import Ai
 from quant.types import Match
 

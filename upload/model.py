@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import math
 from collections import namedtuple
-from enum import IntEnum
 from copy import deepcopy
-from itertools import product
+from enum import IntEnum
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 
 import matplotlib.pyplot as plt
@@ -94,7 +93,7 @@ Summary = namedtuple(
 )
 
 
-def plot_bad_predictions(Y_true, probabilities):
+def plot_bad_predictions(Y_true, probabilities) -> None:
     # Ensure input is a numpy array for consistent processing
     Y_true = np.array(Y_true)
     probabilities = np.array(probabilities)
@@ -279,7 +278,7 @@ class Player:
         probabilities: np.ndarray,
         active_matches: pd.DataFrame,
         summary: Summary,
-    ) -> list:
+    ) -> np.ndarray:
         """Return absolute cash numbers and on what to bet in 2d list."""
         proportions: list[float] = (
             self.get_bet_proportions(probabilities, active_matches, summary)
@@ -438,9 +437,8 @@ class Model:
         )
 
         print(bets)
-        new_bets = new_bets.reindex(opps.index, fill_value=0)
+        return new_bets.reindex(opps.index, fill_value=0)
         # print(new_bets)
-        return new_bets
 
     def put_max_bet(
         self, probabilities: np.ndarray, upcoming_games: Match, summary: Summary
@@ -460,8 +458,7 @@ class Model:
         binary_bets = binary_bets * ratios
         num_of_bets = np.count_nonzero(binary_bets)
         bet = min(budget / num_of_bets, summary.Max_bet)
-        bets = binary_bets * bet
-        return bets
+        return binary_bets * bet
 
     def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
         """Get matches to predict outcome for."""
