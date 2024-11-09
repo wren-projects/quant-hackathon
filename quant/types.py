@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import namedtuple
 from typing import Protocol
 
-type Team = int
+Team = int
 
 Match = namedtuple(
     "Match",

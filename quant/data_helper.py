@@ -87,10 +87,3 @@ class TeamData:
         last_date = self._get_days_since_last_mach(date)
 
         return np.array([last_date, output_points])
-
-
-"""
-data = TeamData(1)
-time = pd.Timestamp("1975-11-20")
-print(data._get_days_scince_last_mach(time))
-"""
