@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from quant.types import Match
+
 if TYPE_CHECKING:
     import os
 
-from data_helper import Team, TeamData
+from quant.data_helper import Team, TeamData
 
 
 class GamePlace(IntEnum):
@@ -61,13 +63,10 @@ class Data:
 
     # all arrays and matrixes needs to be in the same order and of the same size
 
-    # data: pd.DataFrame
-    # train_matrix: np.ndarray
-
-    def __init__(self, data_path: os.PathLike) -> None:
+    def __init__(self, data: pd.DataFrame) -> None:
         """Create Data from csv file."""
-        self.data: pd.DataFrame = pd.read_csv(data_path)
-        self.train_matrix: np.ndarray = np.empty((len(self.data), 4))
+        self.data = data
+        self.train_matrix: np.ndarray = np.empty((len(self.data), 2 * TeamData.COLUMNS))
         self.teams_data: dict[int, TeamData] = {}
 
     '''
@@ -76,35 +75,31 @@ class Data:
 
     '''
 
-    def _get_match_array(self, match_data: pd.Series) -> np.array:
+    def _get_match_array(self, match: Match) -> np.ndarray:
         """
         Return array for specific match and update team data.
 
         Based on matches that happend so far.
         Used for making training matrix.
         """
-        h_id: int = match_data["HID"]
-        a_id: int = match_data["AID"]
-        date: pd.Timestamp = pd.to_datetime(match_data["Date"])
+        h_id: int = match.HID
+        a_id: int = match.AID
+        date: pd.Timestamp = pd.to_datetime(match.Date)
 
-        if h_id not in self.teams_data:
-            self.teams_data[h_id] = TeamData(h_id)
-        if a_id not in self.teams_data:
-            self.teams_data[a_id] = TeamData(a_id)
+        home_team = self.teams_data.setdefault(h_id, TeamData(h_id))
+        away_team = self.teams_data.setdefault(a_id, TeamData(a_id))
 
-        output: np.array = np.concatenate(
+        output: np.ndarray = np.concatenate(
             (
-                self.teams_data[h_id].get_data_vector(Team.Home, date),
-                self.teams_data[a_id].get_data_vector(Team.Away, date),
+                home_team.get_data_vector(Team.Home, date),
+                away_team.get_data_vector(Team.Away, date),
                 # TODO result??
             )
         )
 
-        self.teams_data[h_id].update_data(match_data, Team.Home)
-        self.teams_data[a_id].update_data(match_data, Team.Away)
+        home_team.update(match, Team.Home)
+        away_team.update(match, Team.Away)
 
-        # print(h_id, a_id)
-        # print(output)
         return output
 
     def get_train_matrix(self) -> np.ndarray:
@@ -115,15 +110,15 @@ class Data:
                 ...
                 [home_parametr, away_parametr,..., match_parametr, match_outcome]]
         """
-        for index, line in self.data.iterrows():
-            # print(index)
-            self.train_matrix[index] = self._get_match_array(line)
+        for match in (Match(*row) for row in self.data.itertuples(index=True)):
+            self.train_matrix[match.Index] = self._get_match_array(match)
+            print(f"\r{match.Index}", end="")
 
         return self.train_matrix
 
 
-sampleData = Data("quant/datasets/games.csv")
-print(sampleData.get_train_matrix())
+# sampleData = Data(pd.read_csv("quant/datasets/games.csv"))
+# print(sampleData.get_train_matrix())
 
 
 """
