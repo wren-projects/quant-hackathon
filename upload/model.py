@@ -245,7 +245,7 @@ class Player:
 
         """
         ratios = np.array(active_matches[["OddsH", "OddsA"]])
-        print(ratios)
+        #print(ratios)
         initial_props = np.full_like(probabilities, 0.01, dtype=float)
 
         # Constraint: sum of all props <= 1 (global budget constraint for entire 2D array)
@@ -270,7 +270,7 @@ class Player:
             bounds=bounds,
             constraints=cons,
         )
-        print(np.array(result.x).reshape(probabilities.shape))
+        #print(np.array(result.x).reshape(probabilities.shape))
         return np.array(result.x).reshape(probabilities.shape)
 
     def get_betting_strategy(
@@ -402,7 +402,7 @@ class Model:
         inc: tuple[pd.DataFrame, pd.DataFrame],
     ) -> pd.DataFrame:
         """Run main function."""
-        print("new round")
+        #print("new round")
         games_increment = inc[0]
 
         if not self.trained:
@@ -420,7 +420,7 @@ class Model:
 
             probabilities = self.ai.get_probabilities_reg(data_matrix)
             # probabilities = probabilities * 0.5 + 0.25
-            print(probabilities)
+            #print(probabilities)
 
             bets = self.player.get_betting_strategy(
                 probabilities, upcoming_games, summary
@@ -436,7 +436,7 @@ class Model:
             index=upcoming_games.index,
         )
 
-        print(bets)
+        #print(bets)
         return new_bets.reindex(opps.index, fill_value=0)
         # print(new_bets)
 
@@ -447,14 +447,14 @@ class Model:
         budget = summary.Bankroll / 2
         binary_bets = (probabilities - 0.3).round(decimals=0)
         ratios = deepcopy(np.array(upcoming_games[["OddsH", "OddsA"]]))
-        print(ratios)
+        #print(ratios)
         for i in range(len(ratios)):
             for j in range(2):
                 if ratios[i][j] > ratio_cut_off:
                     ratios[i][j] = 1
                 else:
                     ratios[i][j] = 0
-        print(ratios)
+        #print(ratios)
         binary_bets = binary_bets * ratios
         num_of_bets = np.count_nonzero(binary_bets)
         bet = min(budget / num_of_bets, summary.Max_bet)
