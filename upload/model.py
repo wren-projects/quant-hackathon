@@ -467,8 +467,8 @@ class Model:
         upcoming_games = upcoming_games.reset_index(drop=True)
 
         for match in (Opp(*row) for row in upcoming_games.itertuples(index=True)):
-            home_elo = self.elo.teams[match.HID].rating
-            away_elo = self.elo.teams[match.AID].rating
+            home_elo = self.elo.team_rating(match.HID)
+            away_elo = self.elo.team_rating(match.AID)
 
             data_matrix[match.Index] = [
                 home_elo,
@@ -482,7 +482,7 @@ class Model:
 
     def train_ai(self, dataframe: pd.DataFrame) -> None:
         """Train AI."""
-        train_matrix = np.ndarray([dataframe.shape[0], 5])
+        train_matrix = np.ndarray([dataframe.shape[0], 9])
 
         for match in (Match(*x) for x in dataframe.itertuples()):
             home_elo = self.elo.team_rating(match.HID)
@@ -493,8 +493,8 @@ class Model:
                 away_elo,
                 match.OddsH,
                 match.OddsA,
-                match.H,
                 *self.data.get_match_array(match),
+                match.H,
             ]
 
             self.data.add_match(match)
@@ -504,7 +504,7 @@ class Model:
 
     def train_ai_reg(self, dataframe: pd.DataFrame) -> None:
         """Train AI."""
-        train_matrix = np.ndarray([dataframe.shape[0], 3])
+        train_matrix = np.ndarray([dataframe.shape[0], 9])
 
         for match in (Match(*x) for x in dataframe.itertuples()):
             home_elo = self.elo.team_rating(match.HID)
@@ -515,9 +515,11 @@ class Model:
                 away_elo,
                 match.OddsH,
                 match.OddsA,
+                *self.data.get_match_array(match),
                 match.HSC - match.ASC,
             ]
 
+            self.data.add_match(match)
             self.elo.add_match(match)
 
         self.ai.train_reg(train_matrix)
