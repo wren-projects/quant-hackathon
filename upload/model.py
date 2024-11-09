@@ -289,11 +289,13 @@ class Model:
         self.player = Player()
         self.ai = Ai()
         self.trained = False
+        self.data = Data()
 
     def update_models(self, games_increment: pd.DataFrame) -> None:
         """Update models."""
         for match in (Match(*row) for row in games_increment.itertuples()):
             self.elo.add_match(match)
+            self.data.add_match(match)
 
     def place_bets(
         self,
@@ -345,6 +347,7 @@ class Model:
                 away_elo,
                 match.OddsH,
                 match.OddsA,
+                *self.data.get_match_array(match),
             ]
 
         return data_matrix
@@ -356,8 +359,11 @@ class Model:
         for match in (Match(*x) for x in dataframe.itertuples()):
             self.elo.add_match(match)
 
-            home_elo = self.elo.teams[match.HID].rating
-            away_elo = self.elo.teams[match.AID].rating
+            home_id: TeamID = match.HID
+            away_id: TeamID = match.AID
+
+            home_elo = self.elo.teams[home_id].rating
+            away_elo = self.elo.teams[away_id].rating
 
             train_matrix[match.Index] = [
                 home_elo,
@@ -365,7 +371,10 @@ class Model:
                 match.OddsH,
                 match.OddsA,
                 match.H,
+                *self.data.get_match_array(match),
             ]
+
+            self.data.add_match(match)
 
         self.ai.train(train_matrix)
 
@@ -489,40 +498,29 @@ class TeamData:
 class Data:
     """Class for working with data."""
 
-    def __init__(self, data: pd.DataFrame) -> None:
+    def __init__(self) -> None:
         """Create Data from csv file."""
-        self.data = data
-        self.teams_data: dict[TeamID, TeamData] = {}
+        self.teams: dict[TeamID, TeamData] = {}
 
-    def _get_match_array(self, match: Match) -> np.ndarray:
-        """
-        Return array for specific match and update team data.
+    def add_match(self, match: Match) -> None:
+        """Update team data based on data from one mach."""
+        self.teams.setdefault(match.HID, TeamData(match.HID)).update(match, Team.Home)
+        self.teams.setdefault(match.AID, TeamData(match.AID)).update(match, Team.Away)
 
-        Based on matches that happend so far.
-        Used for making training matrix.
-        """
+    def team_data(self, team_id: TeamID) -> TeamData:
+        """Return the TeamData for given team."""
+        return self.teams[team_id]
+
+    def get_match_array(self, match: Match) -> np.ndarray:
+        """Get array for match."""
+        home_team = self.teams.setdefault(match.HID, TeamData(match.HID))
+        away_team = self.teams.setdefault(match.AID, TeamData(match.AID))
+
         date: pd.Timestamp = pd.to_datetime(match.Date)
 
-        home_team = self.teams_data.setdefault(match.HID, TeamData(match.HID))
-        away_team = self.teams_data.setdefault(match.AID, TeamData(match.AID))
-
-        output: np.ndarray = np.concatenate(
-            (
-                home_team.get_data_vector(Team.Home, date),
-                away_team.get_data_vector(Team.Away, date),
-            )
+        return np.array(
+            [
+                *home_team.get_data_vector(Team.Home, date),
+                *away_team.get_data_vector(Team.Away, date),
+            ]
         )
-
-        home_team.update(match, Team.Home)
-        away_team.update(match, Team.Away)
-
-        return output
-
-    def get_train_matrix(self) -> np.ndarray:
-        """Create train matrix from the current data."""
-        train_matrix: np.ndarray = np.empty((len(self.data), 2 * TeamData.COLUMNS))
-
-        for match in (Match(*row) for row in self.data.itertuples(index=True)):
-            train_matrix[match.Index] = self._get_match_array(match)
-
-        return train_matrix
