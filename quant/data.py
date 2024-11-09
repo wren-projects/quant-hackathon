@@ -10,12 +10,7 @@ import pandas as pd
 if TYPE_CHECKING:
     import os
 
-
-class Team(IntEnum):
-    """Enum discerning teams playing home or away."""
-
-    Home = 0
-    Away = 1
+from data_helper import Team, TeamData
 
 
 class GamePlace(IntEnum):
@@ -33,6 +28,11 @@ def average_points(team: Team, dataframe: pd.DataFrame, n: int) -> np.ndarray:
     For each match, calculate the average of the team's points in their n last
     games.
     """
+    teams_data = TeamsLastN(10)
+    for i in range(len(dataframe)):
+        home_id = int(dataframe.iloc[i]["HID"])
+
+    print()
 
 
 def avg_points_at(
@@ -88,3 +88,11 @@ class Data:
             match_outcomes(self.data),
         ]
         return np.column_stack(columns)
+
+
+# sampleData = Data("quant/dataset/games.csv")
+# sampleData.get_train_matrix()
+
+
+data = pd.read_csv("quant/datasets/games.csv")
+average_points(0, data, 10)

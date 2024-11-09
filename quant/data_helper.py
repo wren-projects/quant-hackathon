@@ -1,5 +1,14 @@
+from enum import IntEnum
+
 import numpy as np
 import pandas as pd
+
+
+class Team(IntEnum):
+    """Enum discerning teams playing home or away."""
+
+    Home = 0
+    Away = 1
 
 
 class CustomQueue:
@@ -24,36 +33,41 @@ class CustomQueue:
 
 
 class TeamData:
-    """Hold data of one team."""
+    """Hold data of one team, both as home and away."""
 
-    def __init__(self, id: int):
+    def __init__(self, team_id: int):
         """Init datastucture."""
-        self.id = id
+        self.id: int = team_id
         self.date_last_mach: pd.Timestamp = pd.to_datetime("1975-11-06")
         self.home_points_last_n: CustomQueue = CustomQueue(10)
         self.away_points_last_n: CustomQueue = CustomQueue(10)
 
-    def get_days_scince_last_mach(self, today: pd.Timestamp) -> int:
+    def _get_days_scince_last_mach(self, today: pd.Timestamp) -> int:
         """Return number of days scince last mach."""
         delta = today - self.date_last_mach
         return delta.days
 
-    def update_data(self, data_line: pd.DataFrame) -> None:
-        """Update team data based on dato from one mach (one line of data)."""
-        self.date_last_mach = data_line["Date"]
-        # TODO update last n based on home_away
+    def update_data(self, data: pd.DataFrame, line: int, home_away: Team) -> None:
+        """Update team data based on data from one mach."""
+        self.date_last_mach = data.iloc[line]["Date"]
+        if home_away == Team.Home:
+            self.home_points_last_n.put(data.iloc[line]["HSC"])
+        else:
+            self.away_points_last_n.put(data.iloc[line]["ASC"])
 
-    def get_data_vector(self, home_away: int) -> np.array:
-        """Return complete data vector for given team."""
-        if home_away == 0:
+    def get_data_vector(self, home_away: Team) -> np.array:
+        """
+        Return complete data vector for given team.
+
+        Return vector:[days scine last mach, avr points in lasnt n matches as H/A]
+        """
+        if home_away == Team.Home:
             output_points = self.home_points_last_n.get_q_avr()
         else:
             output_points = self.away_points_last_n.get_q_avr()
-        return np.array([self.get_days_scince_last_mach, output_points])
+        return np.array([self._get_days_scince_last_mach, output_points])
 
 
-"""
 data = TeamData(1)
 time = pd.Timestamp("1975-11-20")
-print(data.get_days_scince_last_mach(time))
-"""
+print(data._get_days_scince_last_mach(time))
