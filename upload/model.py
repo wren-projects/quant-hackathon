@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections import namedtuple
 from itertools import product
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, TypeAlias
 
 import numpy as np
 import pandas as pd
@@ -13,7 +13,7 @@ from sklearn import metrics, model_selection
 if TYPE_CHECKING:
     import os
 
-type Team = int
+TeamID: TypeAlias = int
 
 Match = namedtuple(
     "Match",
@@ -97,7 +97,7 @@ class RankingModel(Protocol):
         """Add a match to the model."""
         raise NotImplementedError
 
-    def rankings(self) -> dict[Team, float]:
+    def rankings(self) -> dict[TeamID, float]:
         """Return normalized rankings."""
         raise NotImplementedError
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections import namedtuple
-from typing import Protocol
+from typing import Protocol, TypeAlias
 
-Team = int
+TeamID: TypeAlias = int
 
 Match = namedtuple(
     "Match",
@@ -62,6 +62,6 @@ class RankingModel(Protocol):
         """Add a match to the model."""
         raise NotImplementedError
 
-    def rankings(self) -> dict[Team, float]:
+    def rankings(self) -> dict[TeamID, float]:
         """Return normalized rankings."""
         raise NotImplementedError
