@@ -47,27 +47,32 @@ class TeamData:
         delta = today - self.date_last_mach
         return delta.days
 
-    def update_data(self, data: pd.DataFrame, line: int, home_away: Team) -> None:
+    def update_data(self, data_line: pd.Series, home_away: Team) -> None:
         """Update team data based on data from one mach."""
-        self.date_last_mach = data.iloc[line]["Date"]
+        self.date_last_mach = data_line["Date"]
         if home_away == Team.Home:
-            self.home_points_last_n.put(data.iloc[line]["HSC"])
+            self.home_points_last_n.put(data_line["HSC"])
         else:
-            self.away_points_last_n.put(data.iloc[line]["ASC"])
+            self.away_points_last_n.put(data_line["ASC"])
 
-    def get_data_vector(self, home_away: Team) -> np.array:
+    def get_data_vector(self, home_away: Team, date: pd.Timestamp) -> np.array:
         """
         Return complete data vector for given team.
 
-        Return vector:[days scine last mach, avr points in lasnt n matches as H/A]
+        Return vector:[
+        days scine last mach,
+        avr points in lasnt n matches as H/A
+        ]
         """
         if home_away == Team.Home:
             output_points = self.home_points_last_n.get_q_avr()
         else:
             output_points = self.away_points_last_n.get_q_avr()
-        return np.array([self._get_days_scince_last_mach, output_points])
+        return np.array([self._get_days_scince_last_mach(date), output_points])
 
 
+"""
 data = TeamData(1)
 time = pd.Timestamp("1975-11-20")
 print(data._get_days_scince_last_mach(time))
+"""
