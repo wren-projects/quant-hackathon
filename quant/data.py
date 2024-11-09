@@ -67,11 +67,14 @@ class Data:
     def __init__(self, data_path: os.PathLike) -> None:
         """Create Data from csv file."""
         self.data: pd.DataFrame = pd.read_csv(data_path)
-        self.train_matrix: np.ndarray = np.empty(self.data.shape)
+        self.train_matrix: np.ndarray = np.empty((len(self.data), 4))
         self.teams_data: dict[int, TeamData] = {}
 
+    '''
     def add_new_matches_outcome(self, new_matches) -> None:
         """Add new information to existing dataset."""
+
+    '''
 
     def _get_match_array(self, match_data: pd.Series) -> np.array:
         """
@@ -82,14 +85,12 @@ class Data:
         """
         h_id: int = match_data["HID"]
         a_id: int = match_data["AID"]
-        date: pd.Timestamp = match_data["Date"]
+        date: pd.Timestamp = pd.to_datetime(match_data["Date"])
 
         if h_id not in self.teams_data:
             self.teams_data[h_id] = TeamData(h_id)
         if a_id not in self.teams_data:
-            self.teams_data[h_id] = TeamData(a_id)
-
-        self.teams_data[h_id].get_data_vector(Team.Home)
+            self.teams_data[a_id] = TeamData(a_id)
 
         output: np.array = np.concatenate(
             (
@@ -99,9 +100,11 @@ class Data:
             )
         )
 
-        self.teams_data[h_id].update_data(match_data)
-        self.teams_data[a_id].update_data(match_data)
+        self.teams_data[h_id].update_data(match_data, Team.Home)
+        self.teams_data[a_id].update_data(match_data, Team.Away)
 
+        # print(h_id, a_id)
+        # print(output)
         return output
 
     def get_train_matrix(self) -> np.ndarray:
@@ -113,27 +116,17 @@ class Data:
                 [home_parametr, away_parametr,..., match_parametr, match_outcome]]
         """
         for index, line in self.data.iterrows():
+            # print(index)
             self.train_matrix[index] = self._get_match_array(line)
 
         return self.train_matrix
 
-        """
-        columns: list[np.ndarray] = [
-            average_points(Team.Home, self.data, relevant_matches),
-            average_points(Team.Away, self.data, relevant_matches),
-            avg_points_at(Team.Home, GamePlace.Home, self.data, relevant_matches),
-            avg_points_at(Team.Away, GamePlace.Away, self.data, relevant_matches),
-            match_outcomes(self.data),
-        ]
-        return np.column_stack(columns)
-        """
+
+sampleData = Data("quant/datasets/games.csv")
+print(sampleData.get_train_matrix())
 
 
 """
-# sampleData = Data("quant/dataset/games.csv")
-# sampleData.get_train_matrix()
-
-
 data = pd.read_csv("quant/datasets/games.csv")
 average_points(0, data, 10)
 """

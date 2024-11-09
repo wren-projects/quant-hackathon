@@ -49,7 +49,7 @@ class TeamData:
 
     def update_data(self, data_line: pd.Series, home_away: Team) -> None:
         """Update team data based on data from one mach."""
-        self.date_last_mach = data_line["Date"]
+        self.date_last_mach = pd.to_datetime(data_line["Date"])
         if home_away == Team.Home:
             self.home_points_last_n.put(data_line["HSC"])
         else:
