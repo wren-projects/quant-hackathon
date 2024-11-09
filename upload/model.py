@@ -462,7 +462,7 @@ class Model:
 
     def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
         """Get matches to predict outcome for."""
-        data_matrix = np.ndarray([upcoming_games.shape[0], 2])
+        data_matrix = np.ndarray([upcoming_games.shape[0], 8])
 
         upcoming_games = upcoming_games.reset_index(drop=True)
 
