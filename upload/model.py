@@ -245,7 +245,7 @@ class Player:
 
         """
         ratios = np.array(active_matches[["OddsH", "OddsA"]])
-        #print(ratios)
+        # print(ratios)
         initial_props = np.full_like(probabilities, 0.01, dtype=float)
 
         # Constraint: sum of all props <= 1 (global budget constraint for entire 2D array)
@@ -270,7 +270,7 @@ class Player:
             bounds=bounds,
             constraints=cons,
         )
-        #print(np.array(result.x).reshape(probabilities.shape))
+        # print(np.array(result.x).reshape(probabilities.shape))
         return np.array(result.x).reshape(probabilities.shape)
 
     def get_betting_strategy(
@@ -402,7 +402,7 @@ class Model:
         inc: tuple[pd.DataFrame, pd.DataFrame],
     ) -> pd.DataFrame:
         """Run main function."""
-        #print("new round")
+        # print("new round")
         games_increment = inc[0]
 
         if not self.trained:
@@ -420,7 +420,7 @@ class Model:
 
             probabilities = self.ai.get_probabilities_reg(data_matrix)
             # probabilities = probabilities * 0.5 + 0.25
-            #print(probabilities)
+            # print(probabilities)
 
             bets = self.player.get_betting_strategy(
                 probabilities, upcoming_games, summary
@@ -436,7 +436,7 @@ class Model:
             index=upcoming_games.index,
         )
 
-        #print(bets)
+        # print(bets)
         return new_bets.reindex(opps.index, fill_value=0)
         # print(new_bets)
 
@@ -447,14 +447,14 @@ class Model:
         budget = summary.Bankroll / 2
         binary_bets = (probabilities - 0.3).round(decimals=0)
         ratios = deepcopy(np.array(upcoming_games[["OddsH", "OddsA"]]))
-        #print(ratios)
+        # print(ratios)
         for i in range(len(ratios)):
             for j in range(2):
                 if ratios[i][j] > ratio_cut_off:
                     ratios[i][j] = 1
                 else:
                     ratios[i][j] = 0
-        #print(ratios)
+        # print(ratios)
         binary_bets = binary_bets * ratios
         num_of_bets = np.count_nonzero(binary_bets)
         bet = min(budget / num_of_bets, summary.Max_bet)
@@ -462,7 +462,7 @@ class Model:
 
     def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
         """Get matches to predict outcome for."""
-        data_matrix = np.ndarray([upcoming_games.shape[0], 8])
+        data_matrix = np.ndarray([upcoming_games.shape[0], 54])
 
         upcoming_games = upcoming_games.reset_index(drop=True)
 
@@ -504,7 +504,7 @@ class Model:
 
     def train_ai_reg(self, dataframe: pd.DataFrame) -> None:
         """Train AI."""
-        train_matrix = np.ndarray([dataframe.shape[0], 9])
+        train_matrix = np.ndarray([dataframe.shape[0], 55])
 
         for match in (Match(*x) for x in dataframe.itertuples()):
             home_elo = self.elo.team_rating(match.HID)
@@ -595,12 +595,7 @@ class Ai:
             test_size=0.01,
             random_state=6,
         )
-        self.model = xgb.XGBRegressor(
-            objective="reg:squarederror",
-            learning_rate=0.005,
-            n_estimators=500,
-            max_depth=5,
-        )
+        self.model = xgb.XGBRegressor(objective="reg:squarederror")
 
         """
         param_grid = {
@@ -706,20 +701,89 @@ class CustomQueue:
         )
 
 
+'''
+class CustomVectorQueue:
+    """Serve as custom vector version of queue."""
+
+    def __init__(self, n: int, features: int) -> None:
+        """Initialize queue."""
+        self.n: int = n
+        self.features: int = features
+        self.values: np.ndarray = np.empty((features, n))
+        self.__curent_oldest: int = 0
+
+    def put(self, value: np.ndarray) -> None:
+        """Put new values in queue."""
+        self.values[:, self.__curent_oldest % self.n] = value
+        self.__curent_oldest += 1
+
+    def get_q_avr(self) -> np.ndarray:
+        """Return average array of each feature."""
+        return (
+            np.mean(
+                self.values[:, min(self.__curent_oldest, self.n)],
+                axis=1,  # TODO opravit
+            )
+            if self.__curent_oldest
+            else np.zeros(self.features)
+        )
+'''
+
+
 class TeamData:
     """Hold data of one team, both as home and away."""
 
-    N_SHORT = 8
-    N_LONG = 20
+    N_SHORT = 5
+    N_LONG = 80
 
-    COLUMNS = 2
+    COLUMNS = 3
 
     def __init__(self, team_id: TeamID) -> None:
         """Init datastucture."""
         self.id: TeamID = team_id
         self.date_last_mach: pd.Timestamp = pd.to_datetime("1975-11-06")
-        self.home_points_last_n: CustomQueue = CustomQueue(TeamData.N_SHORT)
-        self.away_points_last_n: CustomQueue = CustomQueue(TeamData.N_SHORT)
+
+        # short averages
+        self.win_rate_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.win_rate_home_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.win_rate_away_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+
+        self.points_scored_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_scored_average_home_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_scored_average_away_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+
+        self.points_lost_to_x_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_lost_to_x_average_home_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+        self.points_lost_to_x_average_away_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+
+        self.points_diference_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_diference_average_home_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+        self.points_diference_average_away_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+
+        # long averages
+        self.win_rate_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.win_rate_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.win_rate_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+
+        self.points_scored_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_scored_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_scored_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+
+        self.points_lost_to_x_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_lost_to_x_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_lost_to_x_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+
+        self.points_diference_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_diference_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_diference_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
 
     def _get_days_since_last_mach(self, today: pd.Timestamp) -> int:
         """Return number of days scince last mach."""
@@ -729,31 +793,70 @@ class TeamData:
         """Update team data based on data from one mach."""
         self.date_last_mach = pd.to_datetime(match.Date)
 
+        win = match.H if played_as == Team.Home else match.A
+        points = match.HSC if played_as == Team.Home else match.ASC
+        points_lost_to = match.ASC if played_as == Team.Home else match.HSC
+        point_diference = points - points_lost_to
+
+        self.win_rate_S.put(win)
+        self.win_rate_L.put(win)
+        self.points_scored_average_S.put(points)
+        self.points_scored_average_L.put(points)
+        self.points_lost_to_x_average_S.put(points_lost_to)
+        self.points_lost_to_x_average_L.put(points_lost_to)
+        self.points_diference_average_S.put(point_diference)
+        self.points_diference_average_L.put(point_diference)
+
         if played_as == Team.Home:
-            self.home_points_last_n.put(match.HSC)
+            self.win_rate_home_S.put(win)
+            self.win_rate_home_L.put(win)
+            self.points_scored_average_home_S.put(points)
+            self.points_scored_average_home_L.put(points)
+            self.points_lost_to_x_average_home_S.put(points_lost_to)
+            self.points_lost_to_x_average_home_L.put(points_lost_to)
+            self.points_diference_average_home_S.put(point_diference)
+            self.points_diference_average_home_L.put(point_diference)
         else:
-            self.away_points_last_n.put(match.ASC)
+            self.win_rate_away_S.put(win)
+            self.win_rate_away_L.put(win)
+            self.points_scored_average_away_S.put(points)
+            self.points_scored_average_away_L.put(points)
+            self.points_lost_to_x_average_away_S.put(points_lost_to)
+            self.points_lost_to_x_average_away_L.put(points_lost_to)
+            self.points_diference_average_away_S.put(point_diference)
+            self.points_diference_average_away_L.put(point_diference)
 
-    def get_data_vector(self, played_as: Team, date: pd.Timestamp) -> np.ndarray:
-        """
-        Return complete data vector for given team.
-
-        Return vector:[
-        days scine last mach,
-        avr points in lasnt n matches as H/A
-        ]
-        """
-        points = (
-            self.home_points_last_n
-            if played_as == Team.Home
-            else self.away_points_last_n
+    def get_data_vector(self, date: pd.Timestamp) -> np.ndarray:
+        """Return complete data vector for given team."""
+        return np.array(
+            [
+                self._get_days_since_last_mach(date),
+                self.win_rate_S.get_q_avr(),
+                self.win_rate_home_S.get_q_avr(),
+                self.win_rate_away_S.get_q_avr(),
+                self.points_scored_average_S.get_q_avr(),
+                self.points_scored_average_home_S.get_q_avr(),
+                self.points_scored_average_away_S.get_q_avr(),
+                self.points_lost_to_x_average_S.get_q_avr(),
+                self.points_lost_to_x_average_home_S.get_q_avr(),
+                self.points_lost_to_x_average_away_S.get_q_avr(),
+                self.points_diference_average_S.get_q_avr(),
+                self.points_diference_average_home_S.get_q_avr(),
+                self.points_diference_average_away_S.get_q_avr(),
+                self.win_rate_L.get_q_avr(),
+                self.win_rate_home_L.get_q_avr(),
+                self.win_rate_away_L.get_q_avr(),
+                self.points_scored_average_L.get_q_avr(),
+                self.points_scored_average_home_L.get_q_avr(),
+                self.points_scored_average_away_L.get_q_avr(),
+                self.points_lost_to_x_average_L.get_q_avr(),
+                self.points_lost_to_x_average_home_L.get_q_avr(),
+                self.points_lost_to_x_average_away_L.get_q_avr(),
+                self.points_diference_average_L.get_q_avr(),
+                self.points_diference_average_home_L.get_q_avr(),
+                self.points_diference_average_away_L.get_q_avr(),
+            ]
         )
-
-        output_points = points.get_q_avr()
-
-        last_date = self._get_days_since_last_mach(date)
-
-        return np.array([last_date, output_points])
 
 
 class Data:
@@ -781,7 +884,11 @@ class Data:
 
         return np.array(
             [
-                *home_team.get_data_vector(Team.Home, date),
-                *away_team.get_data_vector(Team.Away, date),
+                *home_team.get_data_vector(date),
+                *away_team.get_data_vector(date),
             ]
         )
+
+
+if __name__ == "__main__":
+    pass
