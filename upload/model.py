@@ -734,7 +734,7 @@ class TeamData:
     """Hold data of one team, both as home and away."""
 
     N_SHORT = 5
-    N_LONG = 80
+    N_LONG = 20
 
     COLUMNS = 3
 
