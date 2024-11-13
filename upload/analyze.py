@@ -15,12 +15,12 @@ guess = [[0,0],[0,0]]
     
 K = 20
 
-def eloSeason(season: pd.DataFrame, base):
+def eloSeason(season: pd.DataFrame):
     eloDif = np.array([np.zeros(2) for i in range(100)])
     def helper(eloH, eloA):
         d = eloA-eloH
         #d = max(min(d,800), -800)
-        A = base**((d)/400)
+        A = 160**((d)/400)
         return 1/(1+A)
     
     x = season.groupby("AID").groups.keys()
@@ -58,7 +58,7 @@ def eloSeason(season: pd.DataFrame, base):
 
 
 
-
+# load everything
 
 games = pd.read_csv("./data/games.csv", index_col=0)
 games["Date"] = pd.to_datetime(games["Date"])
@@ -68,34 +68,34 @@ players = pd.read_csv("./data/players.csv", index_col=0)
 players["Date"] = pd.to_datetime(players["Date"])
 
 
-def main(i):
+
+def main():
     x = np.zeros([100, 2])
     for i, season in games.groupby("Season"):
         #print("SEASON", i)
-        x += eloSeason(season, i)
+        x += eloSeason(season)
     return x
 
 
-for i, col in enumerate(games.columns):
-    if i < 13 or i%2 == 0:
-        continue
-    ...
-    #main(col[1:])
-eloDif = main(i)
+
+
 #print(bets)
 #print(guess)
 #print(bets)
 #print(sum(bets[0])+sum(bets[1]))
 #print(games["HID"].count())
-x = [i/j if j!= 0 else None for i,j in eloDif]
+eloDif = main()
+a = eloDif[:,0]
+b = eloDif[:,1]
+winrate = a/b
 
-# filter out only where x is not None
-a,b = map(np.array,zip(*filter(lambda a: a[0] is not None and a[1] is not None, zip(range(100),x))))
-#print(dict(zip(a,b)))
-dif = a-100*b
-print()
+# filter out all NaNs
+mask = np.logical_not(np.isnan(winrate))
+actual = winrate[mask]*100
+expected = np.arange(100)[mask]
 
-
-print(sum(dif*dif)/len(dif))
-print(sum(dif)/len(a))
-print(np.corrcoef(a,b))
+print(np.corrcoef(actual, expected))
+dif = actual-expected
+print(np.var(dif))
+print(sum(dif)/len(dif))
+print(dict(zip(expected, actual)))
