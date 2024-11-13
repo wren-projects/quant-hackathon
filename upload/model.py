@@ -6,15 +6,17 @@ from copy import deepcopy
 from enum import IntEnum
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 from scipy.optimize import minimize
-from sklearn import metrics, model_selection
 
 if TYPE_CHECKING:
     import os
+
+import warnings
+
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 TeamID: TypeAlias = int
 
@@ -93,85 +95,6 @@ Summary = namedtuple(
 )
 
 
-def plot_bad_predictions(Y_true, probabilities) -> None:
-    # Ensure input is a numpy array for consistent processing
-    Y_true = np.array(Y_true)
-    probabilities = np.array(probabilities)
-
-    # Create a DataFrame for analysis
-    df = pd.DataFrame({"Y_true": Y_true, "probabilities": probabilities})
-
-    # Define bins for grouping probabilities by tens
-    bins = np.arange(0, 1.05, 0.05)
-    labels = [f"{b:.2f}-{b+0.05:.02f}" for b in bins[:-1]]
-
-    # Categorize probabilities into bins
-    df["probability_group"] = pd.cut(
-        df["probabilities"], bins=bins, labels=labels, include_lowest=True
-    )
-
-    # Calculate total instances and bad predictions
-    total_instances = df.groupby("probability_group").size()
-    bad_predictions = df.groupby("probability_group").apply(
-        lambda x: (
-            (
-                (x["Y_true"] == 1) & (x["probabilities"] < 0.5)
-            ).sum()  # True class 1, predicted low
-            + (
-                (x["Y_true"] == 0) & (x["probabilities"] >= 0.5)
-            ).sum()  # True class 0, predicted high
-        )
-    )
-
-    # Calculate the probability of being badly classified
-    bad_classification_probability = bad_predictions / total_instances
-
-    # Prepare data for plotting
-    bad_classification_probability = bad_classification_probability.reset_index(
-        name="bad_classification_prob"
-    )
-    bad_classification_probability["total_count"] = (
-        total_instances.values
-    )  # Add total counts
-
-    # Plotting
-    # Plotting
-    plt.figure(figsize=(10, 6))
-
-    bars = plt.bar(
-        bad_classification_probability["probability_group"],
-        bad_classification_probability["bad_classification_prob"],
-        color="orange",
-    )
-
-    plt.xlabel("Probability Groups (5% Intervals)")
-    plt.ylabel("Probability of Being Badly Classified")
-    plt.title("Probability of Bad Classification by Probability Group (Grouped by 5%)")
-    plt.xticks(rotation=45)
-    plt.ylim(0, 1)
-
-    # Adding counts on top of bars
-    for bar, count in zip(bars, bad_classification_probability["total_count"]):
-        yval = bar.get_height()
-        plt.text(
-            bar.get_x() + bar.get_width() / 2,
-            yval,
-            f"{count}",
-            ha="center",
-            va="bottom",
-            fontsize=10,
-            color="black",
-        )
-
-    plt.tight_layout()
-    plt.show()
-    # Creating a DataFrame for correlation calculation
-    data = pd.DataFrame({"Y_true": Y_true, "probabilities": probabilities})
-    # Calculating the correlation
-    correlation = data.corr().iloc[0, 1]
-    print(f"corelation: {correlation}")
-
-
 class RankingModel(Protocol):
     """Ranking model interface."""
 
@@ -231,21 +154,8 @@ class Player:
         active_matches: pd.DataFrame,
         summary: Summary,
     ) -> np.ndarray:
-        """
-        Return proportions of the budget to bet on given probs.
-
-        Args:
-            probabilities: 2d numpy array of probabilities.
-            active_matches: DataFrame with active matches.
-            summary: Summary of the game state.
-            steps: number of steps to discretize the budget.
-
-        Returns:
-            2d numpy array of proportions with shape (num_bets, 2).
-
-        """
+        """Get bet proportind thru Sharp ratio."""
         ratios = np.array(active_matches[["OddsH", "OddsA"]])
-        # print(ratios)
         initial_props = np.full_like(probabilities, 0.01, dtype=float)
 
         # Constraint: sum of all props <= 1 (global budget constraint for entire 2D array)
@@ -270,7 +180,6 @@ class Player:
             bounds=bounds,
             constraints=cons,
         )
-        # print(np.array(result.x).reshape(probabilities.shape))
         return np.array(result.x).reshape(probabilities.shape)
 
     def get_betting_strategy(
@@ -299,8 +208,6 @@ class TeamElo:
 
     """
 
-    K: int = 400
-    A: int = 200
     opponents: int
     games: int
     wins: int
@@ -312,6 +219,8 @@ class TeamElo:
         self.games = 0
         self.wins = 0
         self.rating = 1200
+        self.K = 400
+        self.A = 200
 
     def adjust(self, opponent: int, win: int) -> None:
         """
@@ -329,6 +238,14 @@ class TeamElo:
         expected = 1 / (1 + 10 ** ((opponent - self.rating) / self.A))
 
         self.rating += int(self.K * (win - expected))
+
+    def change_k_for_team(self, k: int) -> None:
+        """Change Kvalue for ELO team."""
+        self.K = k
+
+    def reset_ranking_for_team(self) -> None:
+        """Reset Elo ranking for team to 1200."""
+        self.rating = 1200
 
     def __str__(self) -> str:
         """Create a string representation of the team's Elo."""
@@ -376,6 +293,16 @@ class Elo(RankingModel):
         """Return Elo rating of a team."""
         return self.teams.setdefault(team_id, TeamElo()).rating
 
+    def change_k(self, k: int) -> None:
+        """Change K for all elo teams."""
+        for team in self.teams.values():
+            team.change_k_for_team(k)
+
+    def reset_rating(self) -> None:
+        """Reset rating for all teams."""
+        for team in self.teams.values():
+            team.reset_ranking_for_team()
+
 
 class Model:
     """Main class."""
@@ -388,6 +315,9 @@ class Model:
         self.ai = Ai()
         self.trained = False
         self.data = Data()
+        self.current_season: int = 0
+        self.beginning_of_new_season = False
+        self.new_season_game_stack: pd.DataFrame = pd.DataFrame()
 
     def update_models(self, games_increment: pd.DataFrame) -> None:
         """Update models."""
@@ -402,16 +332,37 @@ class Model:
         inc: tuple[pd.DataFrame, pd.DataFrame],
     ) -> pd.DataFrame:
         """Run main function."""
-        # print("new round")
         games_increment = inc[0]
+        summary = Summary(*summ.iloc[0])
 
         if not self.trained:
             self.train_ai_reg(games_increment)
             self.trained = True
+            self.current_season = int(games_increment.iloc[-1]["Season"])
         else:
-            self.update_models(games_increment)
+            if games_increment.shape[0] > 0:
+                if self.current_season != int(games_increment.iloc[0]["Season"]):
+                    self.elo.reset_rating()
+                    # self.beginning_of_new_season = True
+                    self.current_season = int(games_increment.iloc[0]["Season"])
+                if self.new_season_game_stack.empty:
+                    self.new_season_game_stack = games_increment
+                else:
+                    self.new_season_game_stack = pd.concat(
+                        [self.new_season_game_stack, games_increment], ignore_index=True
+                    )
 
-        summary = Summary(*summ.iloc[0])
+                    """"if self.new_season_game_stack.shape[0] > 40:
+                        self.elo.change_k(30)"""
+                if (
+                    self.new_season_game_stack.shape[0] > 2000
+                    and pd.to_datetime(summary.Date).month == 5
+                ):
+                    self.beginning_of_new_season = False
+                    self.train_ai_reg(self.new_season_game_stack)
+                    self.new_season_game_stack = pd.DataFrame()
+
+                self.update_models(games_increment)
 
         upcoming_games: pd.DataFrame = opps[opps["Date"] == summary.Date]
 
@@ -419,14 +370,10 @@ class Model:
             data_matrix = self.create_data_matrix(upcoming_games)
 
             probabilities = self.ai.get_probabilities_reg(data_matrix)
-            # probabilities = probabilities * 0.5 + 0.25
-            # print(probabilities)
 
             bets = self.player.get_betting_strategy(
                 probabilities, upcoming_games, summary
             )
-
-            """bets = self.put_max_bet(probabilities, upcoming_games, summary)"""
 
         else:
             bets = []
@@ -435,26 +382,22 @@ class Model:
             columns=pd.Index(["BetH", "BetA"], dtype="str"),
             index=upcoming_games.index,
         )
-
-        # print(bets)
         return new_bets.reindex(opps.index, fill_value=0)
-        # print(new_bets)
 
     def put_max_bet(
         self, probabilities: np.ndarray, upcoming_games: Match, summary: Summary
     ) -> np.ndarray:
-        ratio_cut_off = 1.2
+        """Put all in on one bet."""
+        ratio_cut_off = 1.27
         budget = summary.Bankroll / 2
         binary_bets = (probabilities - 0.3).round(decimals=0)
         ratios = deepcopy(np.array(upcoming_games[["OddsH", "OddsA"]]))
-        # print(ratios)
         for i in range(len(ratios)):
             for j in range(2):
                 if ratios[i][j] > ratio_cut_off:
                     ratios[i][j] = 1
                 else:
                     ratios[i][j] = 0
-        # print(ratios)
         binary_bets = binary_bets * ratios
         num_of_bets = np.count_nonzero(binary_bets)
         bet = min(budget / num_of_bets, summary.Max_bet)
@@ -482,7 +425,7 @@ class Model:
 
     def train_ai(self, dataframe: pd.DataFrame) -> None:
         """Train AI."""
-        train_matrix = np.ndarray([dataframe.shape[0], 9])
+        train_matrix = np.ndarray([dataframe.shape[0], 55])
 
         for match in (Match(*x) for x in dataframe.itertuples()):
             home_elo = self.elo.team_rating(match.HID)
@@ -555,91 +498,33 @@ class Ai:
     def __init__(self):
         """Create a new Model from a XGBClassifier."""
         self.model = xgb.XGBClassifier()
+        self.trained = False
 
     def train(self, train_matrix: np.ndarray) -> None:
         """Return trained model."""
-        len_t = len(train_matrix)
-        print(f"len of training data {len_t}")
-        x_train, x_val, y_train, y_val = model_selection.train_test_split(
-            train_matrix[:-600, :-1],
-            train_matrix[:-600, -1],
-            test_size=0.1,
-            random_state=6,
-        )
-        self.model.fit(x_train, y_train)
-        probabilities = self.model.predict_proba(train_matrix[-600:, :-1])
-        predictions = self.model.predict(train_matrix[-600:, :-1])
-        prob = [probabilities[i][pred] for i, pred in enumerate(predictions)]
-        print("Accuracy:", metrics.accuracy_score(train_matrix[-600:, -1], predictions))
-
-        fpr, fnr, _ = metrics.det_curve(train_matrix[-600:, -1], probabilities[:, -1])
-        print("Average confidence:", sum(prob) / len(prob))
-        plot_bad_predictions(train_matrix[-600:, -1], probabilities[:, -1])
-
-        cm = metrics.confusion_matrix(
-            train_matrix[-600:, -1], predictions, labels=self.model.classes_
-        )
-        disp = metrics.ConfusionMatrixDisplay(
-            confusion_matrix=cm, display_labels=self.model.classes_
-        )
-        disp.plot()
-        plt.show()
+        if self.trained:
+            self.model = self.model.fit(
+                train_matrix[:, :-1],
+                train_matrix[:, -1],
+            )
+            return
+        self.model.fit(train_matrix[:, :-1], train_matrix[:, -1])
+        self.trained = True
 
     def train_reg(self, train_matrix: np.ndarray) -> None:
         """Return trained model."""
-        len_t = len(train_matrix)
-        print(f"len of training data {len_t}")
-        x_train, x_val, y_train, y_val = model_selection.train_test_split(
-            train_matrix[:-600, :-1],
-            train_matrix[:-600, -1],
-            test_size=0.01,
-            random_state=6,
-        )
+        if self.trained:
+            self.model = self.model.fit(
+                train_matrix[:, :-1],
+                train_matrix[:, -1],
+            )
+            return
         self.model = xgb.XGBRegressor(objective="reg:squarederror")
-
-        """
-        param_grid = {
-        'learning_rate': [0.005],
-        'n_estimators': [ 500, 800, 1000],
-        'max_depth': [3, 4 , 5, 6, 7],
-        }
-
-        grid_search = model_selection.GridSearchCV(estimator=self.model, param_grid=param_grid, scoring='neg_mean_squared_error', cv=5)
-
-        grid_search.fit(x_train, y_train)
-
-        print("Best Parameters:", grid_search.best_params_)
-        print("Best Score:", grid_search.best_score_)
-        """
-
-        self.model.fit(x_train, y_train)
-        predictions = self.model.predict(train_matrix[-600:, :-1])
-        print(
-            "RMSE:",
-            math.sqrt(metrics.mean_squared_error(train_matrix[-600:, -1], predictions)),
-        )
-        print("MAE:", metrics.mean_absolute_error(train_matrix[-600:, -1], predictions))
-        probabilities = self.calculate_probabilities(predictions)
-        plot_bad_predictions(
-            train_matrix[-600:, -1].clip(0, 1).round(decimals=0), probabilities[:, -1]
-        )
-        cm = metrics.confusion_matrix(
-            train_matrix[-600:, -1].clip(0, 1).round(decimals=0),
-            probabilities[:, -1].round(decimals=0),
-            labels=[0, 1],
-        )
-        disp = metrics.ConfusionMatrixDisplay(
-            confusion_matrix=cm, display_labels=[0, 1]
-        )
-        disp.plot()
-
-        print(
-            "just home: ",
-            train_matrix[-600:, -1].clip(0, 1).round(decimals=0).sum() / 600,
-        )
-        print("ELO accuracy:", calculate_elo_accuracy(train_matrix[-600:, :]))
-
-        plt.show()
+        if len(train_matrix) > 2005:
+            self.model.fit(train_matrix[-2000:, :-1], train_matrix[-2000:, -1])
+        else:
+            self.model.fit(train_matrix[:, :-1], train_matrix[:, -1])
+        self.trained = True
 
     def get_probabilities(self, data_matrix: np.ndarray) -> np.ndarray:
         """Get probabilities for match outcome [home_loss, home_win]."""
@@ -699,35 +584,6 @@ class CustomQueue:
             if self.__curent_oldest
             else 0.0
         )
-
-
-'''
-class CustomVectorQueue:
-    """Serve as custom vector version of queue."""
-
-    def __init__(self, n: int, features: int) -> None:
-        """Initialize queue."""
-        self.n: int = n
-        self.features: int = features
-        self.values: np.ndarray = np.empty((features, n))
-        self.__curent_oldest: int = 0
-
-    def put(self, value: np.ndarray) -> None:
-        """Put new values in queue."""
-        self.values[:, self.__curent_oldest % self.n] = value
-        self.__curent_oldest += 1
-
-    def get_q_avr(self) -> np.ndarray:
-        """Return average array of each feature."""
-        return (
-            np.mean(
-                self.values[:, min(self.__curent_oldest, self.n)],
-                axis=1,  # TODO opravit
-            )
-            if self.__curent_oldest
-            else np.zeros(self.features)
-        )
-'''
 
 
 class TeamData:
