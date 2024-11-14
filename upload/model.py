@@ -154,7 +154,7 @@ class Player:
         active_matches: pd.DataFrame,
         summary: Summary,
     ) -> np.ndarray:
-        """Get bet proportind thru Sharp ratio."""
+        """Get bet proportind thru Sharp ratio. Probabilities: 2d array."""
         ratios = np.array(active_matches[["OddsH", "OddsA"]])
         initial_props = np.full_like(probabilities, 0.01, dtype=float)
 
@@ -188,7 +188,7 @@ class Player:
         active_matches: pd.DataFrame,
         summary: Summary,
     ) -> np.ndarray:
-        """Return absolute cash numbers and on what to bet in 2d list."""
+        """Return absolute cash numbers and on what to bet in 2d list. Probabilities 2d array."""
         proportions: list[float] = (
             self.get_bet_proportions(probabilities, active_matches, summary)
             * summary.Bankroll
