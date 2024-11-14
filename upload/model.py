@@ -513,8 +513,8 @@ class Model:
         )
         r = new_bets.reindex(opps.index, fill_value=0)
         if summary.Bankroll < (self.new_season_budget * 0.7):
-            r["BetH"] = 0
             r["BetA"] = 0
+            r["BetH"] = 0
         return r
 
     def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
