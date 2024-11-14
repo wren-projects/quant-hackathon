@@ -179,6 +179,7 @@ class Player:
             method="SLSQP",
             bounds=bounds,
             constraints=cons,
+            options={"ftol": 1e-6},
         )
         return np.array(result.x).reshape(probabilities.shape)
 
@@ -380,25 +381,6 @@ class Model:
             index=upcoming_games.index,
         )
         return new_bets.reindex(opps.index, fill_value=0)
-
-    def put_max_bet(
-        self, probabilities: np.ndarray, upcoming_games: Match, summary: Summary
-    ) -> np.ndarray:
-        """Put all in on one bet."""
-        ratio_cut_off = 1.2
-        budget = summary.Bankroll / 2
-        binary_bets = (probabilities - 0.3).round(decimals=0)
-        ratios = deepcopy(np.array(upcoming_games[["OddsH", "OddsA"]]))
-        for i in range(len(ratios)):
-            for j in range(2):
-                if ratios[i][j] > ratio_cut_off:
-                    ratios[i][j] = 1
-                else:
-                    ratios[i][j] = 0
-        binary_bets = binary_bets * ratios
-        num_of_bets = np.count_nonzero(binary_bets)
-        bet = min(budget / num_of_bets, summary.Max_bet)
-        return binary_bets * bet
 
     def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
         """Get matches to predict outcome for."""

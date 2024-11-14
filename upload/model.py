@@ -179,6 +179,7 @@ class Player:
             method="SLSQP",
             bounds=bounds,
             constraints=cons,
+            options={"ftol": 1e-6},
         )
         return np.array(result.x).reshape(probabilities.shape)
 
@@ -318,6 +319,7 @@ class Model:
         self.current_season: int = 0
         self.beginning_of_new_season = False
         self.new_season_game_stack: pd.DataFrame = pd.DataFrame()
+        self.new_season_budget: int = 0
 
     def update_models(self, games_increment: pd.DataFrame) -> None:
         """Update models."""
@@ -335,16 +337,20 @@ class Model:
         games_increment = inc[0]
         summary = Summary(*summ.iloc[0])
 
+        self.new_season_budget = max(self.new_season_budget, summary.Bankroll)
+
         if not self.trained:
             self.train_ai_reg(games_increment)
             self.trained = True
             self.current_season = int(games_increment.iloc[-1]["Season"])
+            self.new_season_budget = summary.Bankroll
         else:
             if games_increment.shape[0] > 0:
                 if self.current_season != int(games_increment.iloc[0]["Season"]):
                     self.elo.reset_rating()
                     # self.beginning_of_new_season = True
                     self.current_season = int(games_increment.iloc[0]["Season"])
+                    self.new_season_budget = summary.Bankroll
                 if self.new_season_game_stack.empty:
                     self.new_season_game_stack = games_increment
                 else:
@@ -366,7 +372,9 @@ class Model:
 
         upcoming_games: pd.DataFrame = opps[opps["Date"] == summary.Date]
 
-        if upcoming_games.shape[0] != 0:
+        if upcoming_games.shape[0] != 0 and summary.Bankroll > (
+            self.new_season_budget * 0.7
+        ):
             data_matrix = self.create_data_matrix(upcoming_games)
 
             probabilities = self.ai.get_probabilities_reg(data_matrix)
@@ -382,7 +390,11 @@ class Model:
             columns=pd.Index(["BetH", "BetA"], dtype="str"),
             index=upcoming_games.index,
         )
-        return new_bets.reindex(opps.index, fill_value=0)
+        r = new_bets.reindex(opps.index, fill_value=0)
+        if summary.Bankroll < (self.new_season_budget * 0.7):
+            r["BetH"] = 0
+            r["BetA"] = 0
+        return r
 
     def put_max_bet(
         self, probabilities: np.ndarray, upcoming_games: Match, summary: Summary
