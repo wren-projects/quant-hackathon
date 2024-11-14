@@ -5,7 +5,7 @@ import pandas as pd
 sys.path.append(".")
 
 from environment import Environment
-from model2 import Model
+from model import Model
 
 games = pd.read_csv("./data/games.csv", index_col=0)
 games["Date"] = pd.to_datetime(games["Date"])

@@ -1,20 +1,21 @@
 from __future__ import annotations
-import sys
+
 import math
 from collections import namedtuple
-from copy import deepcopy
 from enum import IntEnum
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 from scipy.optimize import minimize
-from sklearn import metrics, model_selection
 
 if TYPE_CHECKING:
     import os
+
+import warnings
+
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 TeamID: TypeAlias = int
 
@@ -93,97 +94,6 @@ Summary = namedtuple(
 )
 
 
-def plot_bad_predictions(Y_true, probabilities) -> None:
-    # Ensure input is a numpy array for consistent processing
-    Y_true = np.array(Y_true)
-    probabilities = np.array(probabilities)
-
-    # Create a DataFrame for analysis
-    df = pd.DataFrame({"Y_true": Y_true, "probabilities": probabilities})
-
-    # Define bins for grouping probabilities by tens
-    bins = np.arange(0, 1.05, 0.05)
-    labels = [f"{b:.2f}-{b+0.05:.02f}" for b in bins[:-1]]
-
-    # Categorize probabilities into bins
-    df["probability_group"] = pd.cut(
-        df["probabilities"], bins=bins, labels=labels, include_lowest=True
-    )
-
-    # Calculate total instances and bad predictions
-    total_instances = df.groupby("probability_group").size()
-    bad_predictions = df.groupby("probability_group").apply(
-        lambda x: (
-            (
-                (x["Y_true"] == 1) & (x["probabilities"] < 0.5)
-            ).sum()  # True class 1, predicted low
-            + (
-                (x["Y_true"] == 0) & (x["probabilities"] >= 0.5)
-            ).sum()  # True class 0, predicted high
-        )
-    )
-
-    # Calculate the probability of being badly classified
-    bad_classification_probability = bad_predictions / total_instances
-
-    # Prepare data for plotting
-    bad_classification_probability = bad_classification_probability.reset_index(
-        name="bad_classification_prob"
-    )
-    bad_classification_probability["total_count"] = (
-        total_instances.values
-    )  # Add total counts
-
-    # Plotting
-    # Plotting
-    plt.figure(figsize=(10, 6))
-
-    bars = plt.bar(
-        bad_classification_probability["probability_group"],
-        bad_classification_probability["bad_classification_prob"],
-        color="orange",
-    )
-
-    plt.xlabel("Probability Groups (5% Intervals)")
-    plt.ylabel("Probability of Being Badly Classified")
-    plt.title("Probability of Bad Classification by Probability Group (Grouped by 5%)")
-    plt.xticks(rotation=45)
-    plt.ylim(0, 1)
-
-    # Adding counts on top of bars
-    for bar, count in zip(bars, bad_classification_probability["total_count"]):
-        yval = bar.get_height()
-        plt.text(
-            bar.get_x() + bar.get_width() / 2,
-            yval,
-            f"{count}",
-            ha="center",
-            va="bottom",
-            fontsize=10,
-            color="black",
-        )
-
-    plt.tight_layout()
-    plt.show()
-    # Creating a DataFrame for correlation calculation
-    data = pd.DataFrame({"Y_true": Y_true, "probabilities": probabilities})
-    # Calculating the correlation
-    correlation = data.corr().iloc[0, 1]
-    print(f"corelation: {correlation}")
-
-
-class RankingModel(Protocol):
-    """Ranking model interface."""
-
-    def add_match(self, match: Match) -> None:
-        """Add a match to the model."""
-        raise NotImplementedError
-
-    def rankings(self) -> dict[TeamID, float]:
-        """Return normalized rankings."""
-        raise NotImplementedError
-
-
 class Player:
     """Handles betting strateggy."""
 
@@ -231,21 +141,8 @@ class Player:
         active_matches: pd.DataFrame,
         summary: Summary,
     ) -> np.ndarray:
-        """
-        Return proportions of the budget to bet on given probs.
-
-        Args:
-            probabilities: 2d numpy array of probabilities.
-            active_matches: DataFrame with active matches.
-            summary: Summary of the game state.
-            steps: number of steps to discretize the budget.
-
-        Returns:
-            2d numpy array of proportions with shape (num_bets, 2).
-
-        """
+        """Get bet proportind thru Sharp ratio. Probabilities: 2d array."""
         ratios = np.array(active_matches[["OddsH", "OddsA"]])
-        #print(ratios)
         initial_props = np.full_like(probabilities, 0.01, dtype=float)
 
         # Constraint: sum of all props <= 1 (global budget constraint for entire 2D array)
@@ -269,8 +166,8 @@ class Player:
             method="SLSQP",
             bounds=bounds,
             constraints=cons,
+            options={"ftol": 1e-6},
         )
-        #print(np.array(result.x).reshape(probabilities.shape))
         return np.array(result.x).reshape(probabilities.shape)
 
     def get_betting_strategy(
@@ -279,7 +176,7 @@ class Player:
         active_matches: pd.DataFrame,
         summary: Summary,
     ) -> np.ndarray:
-        """Return absolute cash numbers and on what to bet in 2d list."""
+        """Return absolute cash numbers and on what to bet in 2d list. Probabilities 2d array."""
         proportions: list[float] = (
             self.get_bet_proportions(probabilities, active_matches, summary)
             * summary.Bankroll
@@ -287,7 +184,19 @@ class Player:
         return np.array(proportions).round(decimals=0)
 
 
-class EloTeam:
+class RankingModel(Protocol):
+    """Ranking model interface."""
+
+    def add_match(self, match: Match) -> None:
+        """Add a match to the model."""
+        raise NotImplementedError
+
+    def reset(self) -> None:
+        """Reset the model."""
+        raise NotImplementedError
+
+
+class TeamElo:
     """
     Class for keeping track of a team's Elo.
 
@@ -299,8 +208,9 @@ class EloTeam:
 
     """
 
+    A: int = 400
     K: int = 40
-    base: int = 160
+    BASE: int = 160
     opponents: int
     games: int
     wins: int
@@ -312,29 +222,35 @@ class EloTeam:
         self.wins = 0
         self.rating = 1000
 
-    def adjust(self, opponentElo: float, win: int) -> None:
+    def adjust(self, opponent_elo: float, win: int) -> None:
         """
         Adjust Elo rating based on one match.
 
         Args:
-            opponent: Elo rating of the other team
+            opponent_elo: Elo rating of the other team
             win: 1 for win, 0 for loss
 
         """
         self.games += 1
         self.wins += 1 if win else 0
-        
-        expected = self.predict(opponentElo)
+
+        expected = self.predict(opponent_elo)
 
         self.rating += self.K * (win - expected)
 
-    def predict(self, opponentElo: float):
-        d = opponentElo - self.rating
+    def predict(self, opponent_elo: float) -> float:
+        """
+        Predict outcome of a match with opponent of given Elo.
 
-        A = self.base**(d/400)
-        expected = 1/(1+A)
-        return expected
-    
+        Args:
+            opponent_elo: Elo of the opponent
+
+        Returns:
+            Probability of winning (0..1)
+
+        """
+        d = opponent_elo - self.rating
+        return 1 / (1 + self.BASE ** (d / self.A))
 
     def __str__(self) -> str:
         """Create a string representation of the team's Elo."""
@@ -347,12 +263,11 @@ class EloTeam:
 class Elo(RankingModel):
     """Class for the Elo ranking model."""
 
-    elo_home_by_season: dict[int,dict[int, EloTeam]]
-    elo_away_by_season: dict[int,dict[int, EloTeam]]
+    teams: dict[int, TeamElo]
+
     def __init__(self) -> None:
         """Initialize Elo model."""
-        self.elo_home_by_season = {}
-        self.elo_away_by_season = {}
+        self.teams = {}
 
     def __str__(self) -> str:
         """Create a string representation of the model."""
@@ -365,22 +280,44 @@ class Elo(RankingModel):
 
     def add_match(self, match: Match) -> None:
         """Add a match to the model."""
-        season = match.Season
-        if season not in self.elo_home_by_season:
-            self.elo_home_by_season[season] = {}
-            self.elo_away_by_season[season] = {}
-        elo_home = self.elo_home_by_season[season]
-        elo_away = self.elo_away_by_season[season]
+        home_team = self.teams.setdefault(match.HID, TeamElo())
+        away_team = self.teams.setdefault(match.AID, TeamElo())
+
+        home_elo = home_team.rating
+        away_elo = away_team.rating
+
+        home_team.adjust(away_elo, match.H)
+        away_team.adjust(home_elo, match.A)
+
+    def rankings(self) -> dict[int, float]:
+        """Return normalized rankings."""
+        max_elo = max(elo.rating for elo in self.teams.values())
+        return {team: teamElo.rating / max_elo for team, teamElo in self.teams.items()}
+
+    def team_rating(self, team_id: int) -> float:
+        """Return Elo rating of a team."""
+        return self.teams.setdefault(team_id, TeamElo()).rating
+
+    def reset(self) -> None:
+        """Reset the model."""
+        self.teams = {}
 
 
-        if match.HID not in elo_home:
-            elo_home[match.HID] = EloTeam()
+class EloByLocation(RankingModel):
+    """Class for the Elo ranking model."""
 
-        if match.AID not in elo_away:
-            elo_away[match.AID] = EloTeam()
+    teams_home: dict[int, TeamElo]
+    teams_away: dict[int, TeamElo]
 
-        home_elo = elo_home[match.HID]
-        away_elo = elo_away[match.AID]
+    def __init__(self) -> None:
+        """Initialize Elo model."""
+        self.teams_home = {}
+        self.teams_away = {}
+
+    def add_match(self, match: Match) -> None:
+        """Add a match to the model."""
+        home_elo = self.teams_home.setdefault(match.HID, TeamElo())
+        away_elo = self.teams_away.setdefault(match.AID, TeamElo())
 
         # memorize elo values before they change
         home_elo_value = home_elo.rating
@@ -388,34 +325,25 @@ class Elo(RankingModel):
 
         home_elo.adjust(away_elo_value, match.H)
         away_elo.adjust(home_elo_value, match.A)
-        
-    def predict(self, match: Opp) -> float|None:
+
+    def predict(self, match: Opp) -> float | None:
         """
         Predicts how the match might go.
+
         Float from 0 to 1 = chance of H to win
         None means no data
         """
-        season = match.Season
-        if season not in self.elo_home_by_season:
-            self.elo_home_by_season[season] = {}
-            self.elo_away_by_season[season] = {}
+        home_elo = self.teams_home.setdefault(match.HID, TeamElo())
+        away_elo = self.teams_away.setdefault(match.AID, TeamElo())
 
-        elo_home = self.elo_home_by_season[season]
-        elo_away = self.elo_away_by_season[season]
+        played_enough = home_elo.games >= 10 and away_elo.games >= 10
+        return home_elo.predict(away_elo.rating) if played_enough else None
 
-        if match.HID not in elo_home:
-            elo_home[match.HID] = EloTeam()
+    def reset(self) -> None:
+        """Reset the model."""
+        self.teams_home.clear()
+        self.teams_away.clear()
 
-        if match.AID not in elo_away:
-            elo_away[match.AID] = EloTeam()
-
-        home_elo = elo_home[match.HID]
-        away_elo = elo_away[match.AID]
-        if home_elo.games < 10 or away_elo.games < 10:
-            return None
-        return home_elo.predict(away_elo.rating)
-
-        
 
 class Model:
     """Main class."""
@@ -424,41 +352,435 @@ class Model:
         """Init classes."""
         self.seen_matches = set()
         self.elo = Elo()
+        self.elo_by_location = EloByLocation()
+        self.player = Player()
+        self.ai = Ai()
+        self.trained = False
+        self.data = Data()
+        self.current_season: int = 0
+        self.new_season_game_stack: pd.DataFrame = pd.DataFrame()
+        self.new_season_budget: int = 0
 
     def update_models(self, games_increment: pd.DataFrame) -> None:
         """Update models."""
         for match in (Match(*row) for row in games_increment.itertuples()):
             self.elo.add_match(match)
+            self.elo_by_location.add_match(match)
+            self.data.add_match(match)
 
     def place_bets(
         self,
         summ: pd.DataFrame,
-        opportunities: pd.DataFrame,
+        opps: pd.DataFrame,
         inc: tuple[pd.DataFrame, pd.DataFrame],
     ) -> pd.DataFrame:
         """Run main function."""
-        #print("new round")
-        self.update_models(inc[0])
-
-
+        games_increment = inc[0]
         summary = Summary(*summ.iloc[0])
-        maxBet = summary.Max_bet
-        bankroll = summary.Bankroll
-        
-        opportunities["ELO"] = opportunities.apply(lambda row: self.elo.predict(row),axis=1)
-        opportunities["EV"] = opportunities["ELO"]*opportunities["OddsH"]
-        toBetOn = opportunities[opportunities["ELO"] is not None and opportunities["EV"] >= 2]
-        toBetOn = toBetOn.sort_values(by=["EV"], ascending=False)
 
-        toBetOn["BetH"] = maxBet
+        if not self.trained:
+            self.train_ai_reg(games_increment)
+            self.trained = True
+            self.current_season = int(games_increment.iloc[-1]["Season"])
+            self.new_season_budget = summary.Bankroll
+        elif games_increment.shape[0] > 0:
+            if self.current_season != int(games_increment.iloc[0]["Season"]):
+                self.elo.reset()
+                self.elo_by_location.reset()
+                self.current_season = int(games_increment.iloc[0]["Season"])
+                self.new_season_budget = summary.Bankroll
+            if self.new_season_game_stack.empty:
+                self.new_season_game_stack = games_increment
+            else:
+                self.new_season_game_stack = pd.concat(
+                    [self.new_season_game_stack, games_increment], ignore_index=True
+                )
 
-        # not enough money
-        if toBetOn["BetH"].sum() > bankroll:
-            rows_to_discard = int((toBetOn["BetH"].sum()-bankroll)//maxBet)
-            if rows_to_discard > 0:
-                toBetOn = toBetOn[:-rows_to_discard]
-            toBetOn.loc[toBetOn.index[-1],"BetH"] -= (toBetOn["BetH"].sum()-bankroll)%maxBet
+            if (
+                self.new_season_game_stack.shape[0] > 2000
+                and pd.to_datetime(summary.Date).month == 1
+            ):
+                self.train_ai_reg(self.new_season_game_stack)
+                self.new_season_game_stack = pd.DataFrame()
+
+            self.update_models(games_increment)
+
+        upcoming_games: pd.DataFrame = opps[opps["Date"] == summary.Date]
+
+        if upcoming_games.shape[0] != 0 and summary.Bankroll > (
+            self.new_season_budget * 0.7
+        ):
+            data_matrix = self.create_data_matrix(upcoming_games)
+
+            probabilities = self.ai.get_probabilities_reg(data_matrix)
+
+            bets = self.player.get_betting_strategy(
+                probabilities, upcoming_games, summary
+            )
+
+        else:
+            bets = []
+        new_bets = pd.DataFrame(
+            data=bets,
+            columns=pd.Index(["BetH", "BetA"], dtype="str"),
+            index=upcoming_games.index,
+        )
+        r = new_bets.reindex(opps.index, fill_value=0)
+        if summary.Bankroll < (self.new_season_budget * 0.7):
+            r["BetH"] = 0
+            r["BetA"] = 0
+        return r
+
+    def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
+        """Get matches to predict outcome for."""
+        data_matrix = np.ndarray([upcoming_games.shape[0], 55])
+
+        upcoming_games = upcoming_games.reset_index(drop=True)
+
+        for match in (Opp(*row) for row in upcoming_games.itertuples(index=True)):
+            home_elo = self.elo.team_rating(match.HID)
+            away_elo = self.elo.team_rating(match.AID)
+            elo_by_location_prediction = self.elo_by_location.predict(match)
+
+            data_matrix[match.Index] = [
+                home_elo,
+                away_elo,
+                elo_by_location_prediction,
+                match.OddsH,
+                match.OddsA,
+                *self.data.get_match_array(match),
+            ]
+
+        return data_matrix
+
+    def train_ai(self, dataframe: pd.DataFrame) -> None:
+        """Train AI."""
+        train_matrix = np.ndarray([dataframe.shape[0], 56])
+
+        for match in (Match(*x) for x in dataframe.itertuples()):
+            home_elo = self.elo.team_rating(match.HID)
+            away_elo = self.elo.team_rating(match.AID)
+            elo_by_location_prediction = self.elo_by_location.predict(match)
+
+            train_matrix[match.Index] = [
+                home_elo,
+                away_elo,
+                elo_by_location_prediction,
+                match.OddsH,
+                match.OddsA,
+                *self.data.get_match_array(match),
+                match.H,
+            ]
+
+            self.data.add_match(match)
+            self.elo.add_match(match)
+            self.elo_by_location.add_match(match)
+
+        self.ai.train(train_matrix)
+
+    def train_ai_reg(self, dataframe: pd.DataFrame) -> None:
+        """Train AI."""
+        train_matrix = np.ndarray([dataframe.shape[0], 56])
+
+        for match in (Match(*x) for x in dataframe.itertuples()):
+            home_elo = self.elo.team_rating(match.HID)
+            away_elo = self.elo.team_rating(match.AID)
+            elo_by_location_prediction = self.elo_by_location.predict(match)
+
+            train_matrix[match.Index] = [
+                home_elo,
+                away_elo,
+                elo_by_location_prediction,
+                match.OddsH,
+                match.OddsA,
+                *self.data.get_match_array(match),
+                match.HSC - match.ASC,
+            ]
+
+            self.data.add_match(match)
+            self.elo.add_match(match)
+            self.elo_by_location.add_match(match)
+
+        self.ai.train_reg(train_matrix)
 
 
-        toBetOn["BetA"] = 0
-        return toBetOn
+def calculate_elo_accuracy(data: list[list[int]]) -> float:
+    """Calculate the accuracy of ELO predictions."""
+    correct_predictions = 0
+    total_games = len(data)
+    games = np.array(data)[:, :-1]
+    outcomes = np.array(data)[:, -1].clip(0, 1).round(decimals=0)
+    for i in range(len(data)):
+        elo_home = games[i][0]
+        elo_away = games[i][1]
+        outcome = outcomes[i]
+
+        # Predict home win if home ELO is greater than away ELO
+        predicted_outcome = 1 if elo_home > elo_away else 0
+
+        # Compare predicted outcome with actual outcome
+        if predicted_outcome == outcome:
+            correct_predictions += 1
+
+    # Calculate accuracy as a percentage
+    return correct_predictions / total_games
+
+
+class Ai:
+    """Class for training and predicting."""
+
+    model: xgb.XGBRegressor
+
+    def __init__(self):
+        """Create a new Model from a XGBClassifier."""
+        self.model = xgb.XGBClassifier()
+        self.trained = False
+
+    def train(self, train_matrix: np.ndarray) -> None:
+        """Return trained model."""
+        if self.trained:
+            self.model = self.model.fit(
+                train_matrix[:, :-1],
+                train_matrix[:, -1],
+            )
+            return
+        self.model.fit(train_matrix[:, :-1], train_matrix[:, -1])
+        self.trained = True
+
+    def train_reg(self, train_matrix: np.ndarray) -> None:
+        """Return trained model."""
+        if self.trained:
+            self.model = self.model.fit(
+                train_matrix[-2000:, :-1],
+                train_matrix[-2000:, -1],
+            )
+            return
+        self.model = xgb.XGBRegressor(objective="reg:squarederror")
+        if len(train_matrix) > 2005:
+            self.model.fit(train_matrix[-2000:, :-1], train_matrix[-2000:, -1])
+        else:
+            self.model.fit(train_matrix[:, :-1], train_matrix[:, -1])
+        self.trained = True
+
+    def get_probabilities(self, data_matrix: np.ndarray) -> np.ndarray:
+        """Get probabilities for match outcome [home_loss, home_win]."""
+        return np.array(self.model.predict_proba(data_matrix))[:, ::-1]
+
+    def get_probabilities_reg(self, data_matrix: np.ndarray) -> np.ndarray:
+        """Get probabilities for match outcome [home_loss, home_win]."""
+        predicted_dif_score = np.array(self.model.predict(data_matrix))
+        return self.calculate_probabilities(predicted_dif_score)[:, ::-1]
+
+    def save_model(self, path: os.PathLike) -> None:
+        """Save ML model."""
+        self.model.save_model(path)
+
+    def home_team_win_probability(self, point_difference: float) -> float:
+        slope = 0.8  # range optimal 0.1 to 1. liked 0.3 and 0.5 (maybe 1)
+        return 1 / (1 + np.exp(-slope * point_difference))
+
+    def calculate_probabilities(self, score_differences: np.ndarray) -> np.ndarray:
+        """Calculate the probabilities of home and away teams winning based on score differences."""
+        probabilities = np.zeros((len(score_differences), 2))
+        for i, diff in enumerate(score_differences):
+            home_prob = self.home_team_win_probability(diff)
+            away_prob = 1 - home_prob
+            probabilities[i] = [away_prob, home_prob]
+        return probabilities
+
+
+class Team(IntEnum):
+    """Enum discerning teams playing home or away."""
+
+    Home = 0
+    Away = 1
+
+
+class CustomQueue:
+    """Serve as custom version of queue."""
+
+    def __init__(self, n: int) -> None:
+        """Initialize queue."""
+        self.size: int = n
+        self.values: np.array = np.zeros((n, 1))
+        self.__curent_oldest: int = 0
+
+    def put(self, value: float) -> None:
+        """Put new value in queue."""
+        self.values[self.__curent_oldest % self.size] = value
+        self.__curent_oldest += 1
+
+    def get_q_avr(self) -> float:
+        """Return average array of each feature."""
+        if self.__curent_oldest == 0:
+            return 0.0
+
+        return (
+            np.sum(self.values) / min(self.size, self.__curent_oldest)
+            if self.__curent_oldest
+            else 0.0
+        )
+
+
+class TeamData:
+    """Hold data of one team, both as home and away."""
+
+    N_SHORT = 5
+    N_LONG = 20
+
+    COLUMNS = 3
+
+    def __init__(self, team_id: TeamID) -> None:
+        """Init datastucture."""
+        self.id: TeamID = team_id
+        self.date_last_mach: pd.Timestamp = pd.to_datetime("1975-11-06")
+
+        # short averages
+        self.win_rate_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.win_rate_home_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.win_rate_away_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+
+        self.points_scored_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_scored_average_home_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_scored_average_away_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+
+        self.points_lost_to_x_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_lost_to_x_average_home_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+        self.points_lost_to_x_average_away_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+
+        self.points_diference_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_diference_average_home_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+        self.points_diference_average_away_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+
+        # long averages
+        self.win_rate_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.win_rate_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.win_rate_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+
+        self.points_scored_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_scored_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_scored_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+
+        self.points_lost_to_x_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_lost_to_x_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_lost_to_x_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+
+        self.points_diference_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_diference_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_diference_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+
+    def _get_days_since_last_mach(self, today: pd.Timestamp) -> int:
+        """Return number of days scince last mach."""
+        return (today - self.date_last_mach).days
+
+    def update(self, match: Match, played_as: Team) -> None:
+        """Update team data based on data from one mach."""
+        self.date_last_mach = pd.to_datetime(match.Date)
+
+        win = match.H if played_as == Team.Home else match.A
+        points = match.HSC if played_as == Team.Home else match.ASC
+        points_lost_to = match.ASC if played_as == Team.Home else match.HSC
+        point_diference = points - points_lost_to
+
+        self.win_rate_S.put(win)
+        self.win_rate_L.put(win)
+        self.points_scored_average_S.put(points)
+        self.points_scored_average_L.put(points)
+        self.points_lost_to_x_average_S.put(points_lost_to)
+        self.points_lost_to_x_average_L.put(points_lost_to)
+        self.points_diference_average_S.put(point_diference)
+        self.points_diference_average_L.put(point_diference)
+
+        if played_as == Team.Home:
+            self.win_rate_home_S.put(win)
+            self.win_rate_home_L.put(win)
+            self.points_scored_average_home_S.put(points)
+            self.points_scored_average_home_L.put(points)
+            self.points_lost_to_x_average_home_S.put(points_lost_to)
+            self.points_lost_to_x_average_home_L.put(points_lost_to)
+            self.points_diference_average_home_S.put(point_diference)
+            self.points_diference_average_home_L.put(point_diference)
+        else:
+            self.win_rate_away_S.put(win)
+            self.win_rate_away_L.put(win)
+            self.points_scored_average_away_S.put(points)
+            self.points_scored_average_away_L.put(points)
+            self.points_lost_to_x_average_away_S.put(points_lost_to)
+            self.points_lost_to_x_average_away_L.put(points_lost_to)
+            self.points_diference_average_away_S.put(point_diference)
+            self.points_diference_average_away_L.put(point_diference)
+
+    def get_data_vector(self, date: pd.Timestamp) -> np.ndarray:
+        """Return complete data vector for given team."""
+        return np.array(
+            [
+                self._get_days_since_last_mach(date),
+                self.win_rate_S.get_q_avr(),
+                self.win_rate_home_S.get_q_avr(),
+                self.win_rate_away_S.get_q_avr(),
+                self.points_scored_average_S.get_q_avr(),
+                self.points_scored_average_home_S.get_q_avr(),
+                self.points_scored_average_away_S.get_q_avr(),
+                self.points_lost_to_x_average_S.get_q_avr(),
+                self.points_lost_to_x_average_home_S.get_q_avr(),
+                self.points_lost_to_x_average_away_S.get_q_avr(),
+                self.points_diference_average_S.get_q_avr(),
+                self.points_diference_average_home_S.get_q_avr(),
+                self.points_diference_average_away_S.get_q_avr(),
+                self.win_rate_L.get_q_avr(),
+                self.win_rate_home_L.get_q_avr(),
+                self.win_rate_away_L.get_q_avr(),
+                self.points_scored_average_L.get_q_avr(),
+                self.points_scored_average_home_L.get_q_avr(),
+                self.points_scored_average_away_L.get_q_avr(),
+                self.points_lost_to_x_average_L.get_q_avr(),
+                self.points_lost_to_x_average_home_L.get_q_avr(),
+                self.points_lost_to_x_average_away_L.get_q_avr(),
+                self.points_diference_average_L.get_q_avr(),
+                self.points_diference_average_home_L.get_q_avr(),
+                self.points_diference_average_away_L.get_q_avr(),
+            ]
+        )
+
+
+class Data:
+    """Class for working with data."""
+
+    def __init__(self) -> None:
+        """Create Data from csv file."""
+        self.teams: dict[TeamID, TeamData] = {}
+
+    def add_match(self, match: Match) -> None:
+        """Update team data based on data from one mach."""
+        self.teams.setdefault(match.HID, TeamData(match.HID)).update(match, Team.Home)
+        self.teams.setdefault(match.AID, TeamData(match.AID)).update(match, Team.Away)
+
+    def team_data(self, team_id: TeamID) -> TeamData:
+        """Return the TeamData for given team."""
+        return self.teams[team_id]
+
+    def get_match_array(self, match: Match) -> np.ndarray:
+        """Get array for match."""
+        home_team = self.teams.setdefault(match.HID, TeamData(match.HID))
+        away_team = self.teams.setdefault(match.AID, TeamData(match.AID))
+
+        date: pd.Timestamp = pd.to_datetime(match.Date)
+
+        return np.array(
+            [
+                *home_team.get_data_vector(date),
+                *away_team.get_data_vector(date),
+            ]
+        )
+
+
+if __name__ == "__main__":
+    pass
