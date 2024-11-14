@@ -337,8 +337,6 @@ class Model:
         games_increment = inc[0]
         summary = Summary(*summ.iloc[0])
 
-        self.new_season_budget = max(self.new_season_budget, summary.Bankroll)
-
         if not self.trained:
             self.train_ai_reg(games_increment)
             self.trained = True
@@ -362,9 +360,9 @@ class Model:
                         self.elo.change_k(30)"""
                 if (
                     self.new_season_game_stack.shape[0] > 2000
-                    and pd.to_datetime(summary.Date).month == 5
+                    and pd.to_datetime(summary.Date).month == 1
                 ):
-                    self.beginning_of_new_season = False
+                    # self.beginning_of_new_season = False
                     self.train_ai_reg(self.new_season_game_stack)
                     self.new_season_game_stack = pd.DataFrame()
 
@@ -527,8 +525,8 @@ class Ai:
         """Return trained model."""
         if self.trained:
             self.model = self.model.fit(
-                train_matrix[:, :-1],
-                train_matrix[:, -1],
+                train_matrix[-2000:, :-1],
+                train_matrix[-2000:, -1],
             )
             return
         self.model = xgb.XGBRegressor(objective="reg:squarederror")
