@@ -197,6 +197,125 @@ class Player:
         return np.array(proportions).round(decimals=0)
 
 
+class EloTeamPos:
+    """
+    Class for keeping track of a team's Elo.
+
+    Attributes:
+        opponents: Sum of Elo ratings of opponents
+        games: Number of games
+        wins: Number of wins
+        rating: Current Elo rating
+
+    """
+
+    K: int = 40
+    base: int = 160
+    opponents: int
+    games: int
+    wins: int
+    rating: float
+
+    def __init__(self) -> None:
+        """Initialize TeamElo."""
+        self.games = 0
+        self.wins = 0
+        self.rating = 1000
+
+    def adjust(self, opponentElo: float, win: int) -> None:
+        """
+        Adjust Elo rating based on one match.
+
+        Args:
+            opponent: Elo rating of the other team
+            win: 1 for win, 0 for loss
+
+        """
+        self.games += 1
+        self.wins += 1 if win else 0
+
+        expected = self.predict(opponentElo)
+
+        self.rating += self.K * (win - expected)
+
+    def predict(self, opponentElo: float):
+        d = opponentElo - self.rating
+
+        A = self.base ** (d / 400)
+        expected = 1 / (1 + A)
+        return expected
+
+    def __str__(self) -> str:
+        """Create a string representation of the team's Elo."""
+        return (
+            f"{self.rating:>4} ({self.games:>4}, "
+            f"{self.wins:>4}, {self.wins / self.games * 100:>6.2f}%)"
+        )
+
+
+class EloPos:
+    """Class for the Elo ranking model."""
+
+    elo_home_by_season: dict[int, dict[int, EloTeamPos]]
+    elo_away_by_season: dict[int, dict[int, EloTeamPos]]
+
+    def __init__(self) -> None:
+        """Initialize Elo model."""
+        self.elo_home_by_season = {}
+        self.elo_away_by_season = {}
+
+    def add_match(self, match: Match) -> None:
+        """Add a match to the model."""
+        season = match.Season
+        if season not in self.elo_home_by_season:
+            self.elo_home_by_season[season] = {}
+            self.elo_away_by_season[season] = {}
+        elo_home = self.elo_home_by_season[season]
+        elo_away = self.elo_away_by_season[season]
+
+        if match.HID not in elo_home:
+            elo_home[match.HID] = EloTeamPos()
+
+        if match.AID not in elo_away:
+            elo_away[match.AID] = EloTeamPos()
+
+        home_elo = elo_home[match.HID]
+        away_elo = elo_away[match.AID]
+
+        # memorize elo values before they change
+        home_elo_value = home_elo.rating
+        away_elo_value = away_elo.rating
+
+        home_elo.adjust(away_elo_value, match.H)
+        away_elo.adjust(home_elo_value, match.A)
+
+    def predict(self, match: Opp) -> float | None:
+        """
+        Predicts how the match might go.
+        Float from 0 to 1 = chance of H to win
+        None means no data
+        """
+        season = match.Season
+        if season not in self.elo_home_by_season:
+            self.elo_home_by_season[season] = {}
+            self.elo_away_by_season[season] = {}
+
+        elo_home = self.elo_home_by_season[season]
+        elo_away = self.elo_away_by_season[season]
+
+        if match.HID not in elo_home:
+            elo_home[match.HID] = EloTeamPos()
+
+        if match.AID not in elo_away:
+            elo_away[match.AID] = EloTeamPos()
+
+        home_elo = elo_home[match.HID]
+        away_elo = elo_away[match.AID]
+        if home_elo.games < 10 or away_elo.games < 10:
+            return None
+        return home_elo.predict(away_elo.rating)
+
+
 class TeamElo:
     """
     Class for keeping track of a team's Elo.
@@ -312,6 +431,7 @@ class Model:
         """Init classes."""
         self.seen_matches = set()
         self.elo = Elo()
+        self.elopos = EloPos()
         self.player = Player()
         self.ai = Ai()
         self.trained = False
@@ -326,6 +446,11 @@ class Model:
             self.elo.add_match(match)
             self.data.add_match(match)
 
+    def update_models_pos(self, games_increment: pd.DataFrame) -> None:
+        """Update models."""
+        for match in (Match(*row) for row in games_increment.itertuples()):
+            self.elo.add_match(match)
+
     def place_bets(
         self,
         summ: pd.DataFrame,
@@ -335,6 +460,8 @@ class Model:
         """Run main function."""
         games_increment = inc[0]
         summary = Summary(*summ.iloc[0])
+
+        self.update_models_pos(inc[0])
 
         if not self.trained:
             self.train_ai_reg(games_increment)
@@ -392,17 +519,19 @@ class Model:
 
     def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
         """Get matches to predict outcome for."""
-        data_matrix = np.ndarray([upcoming_games.shape[0], 54])
+        data_matrix = np.ndarray([upcoming_games.shape[0], 55])
 
         upcoming_games = upcoming_games.reset_index(drop=True)
 
         for match in (Opp(*row) for row in upcoming_games.itertuples(index=True)):
             home_elo = self.elo.team_rating(match.HID)
             away_elo = self.elo.team_rating(match.AID)
+            elo_pos_predict = self.elopos.predict(match)
 
             data_matrix[match.Index] = [
                 home_elo,
                 away_elo,
+                elo_pos_predict,
                 match.OddsH,
                 match.OddsA,
                 *self.data.get_match_array(match),
@@ -434,15 +563,17 @@ class Model:
 
     def train_ai_reg(self, dataframe: pd.DataFrame) -> None:
         """Train AI."""
-        train_matrix = np.ndarray([dataframe.shape[0], 55])
+        train_matrix = np.ndarray([dataframe.shape[0], 56])
 
         for match in (Match(*x) for x in dataframe.itertuples()):
             home_elo = self.elo.team_rating(match.HID)
             away_elo = self.elo.team_rating(match.AID)
+            elo_pos_predict = self.elopos.predict(match)
 
             train_matrix[match.Index] = [
                 home_elo,
                 away_elo,
+                elo_pos_predict,
                 match.OddsH,
                 match.OddsA,
                 *self.data.get_match_array(match),
