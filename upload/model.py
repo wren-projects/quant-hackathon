@@ -317,7 +317,6 @@ class Model:
         self.trained = False
         self.data = Data()
         self.current_season: int = 0
-        self.beginning_of_new_season = False
         self.new_season_game_stack: pd.DataFrame = pd.DataFrame()
         self.new_season_budget: int = 0
 
@@ -346,7 +345,6 @@ class Model:
             if games_increment.shape[0] > 0:
                 if self.current_season != int(games_increment.iloc[0]["Season"]):
                     self.elo.reset_rating()
-                    # self.beginning_of_new_season = True
                     self.current_season = int(games_increment.iloc[0]["Season"])
                     self.new_season_budget = summary.Bankroll
                 if self.new_season_game_stack.empty:
@@ -356,13 +354,11 @@ class Model:
                         [self.new_season_game_stack, games_increment], ignore_index=True
                     )
 
-                    """"if self.new_season_game_stack.shape[0] > 40:
-                        self.elo.change_k(30)"""
                 if (
                     self.new_season_game_stack.shape[0] > 2000
                     and pd.to_datetime(summary.Date).month == 1
                 ):
-                    # self.beginning_of_new_season = False
+
                     self.train_ai_reg(self.new_season_game_stack)
                     self.new_season_game_stack = pd.DataFrame()
 
@@ -393,25 +389,6 @@ class Model:
             r["BetH"] = 0
             r["BetA"] = 0
         return r
-
-    def put_max_bet(
-        self, probabilities: np.ndarray, upcoming_games: Match, summary: Summary
-    ) -> np.ndarray:
-        """Put all in on one bet."""
-        ratio_cut_off = 1.27
-        budget = summary.Bankroll / 2
-        binary_bets = (probabilities - 0.3).round(decimals=0)
-        ratios = deepcopy(np.array(upcoming_games[["OddsH", "OddsA"]]))
-        for i in range(len(ratios)):
-            for j in range(2):
-                if ratios[i][j] > ratio_cut_off:
-                    ratios[i][j] = 1
-                else:
-                    ratios[i][j] = 0
-        binary_bets = binary_bets * ratios
-        num_of_bets = np.count_nonzero(binary_bets)
-        bet = min(budget / num_of_bets, summary.Max_bet)
-        return binary_bets * bet
 
     def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
         """Get matches to predict outcome for."""
