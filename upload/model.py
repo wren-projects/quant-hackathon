@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from datetime import time
 import math
-from collections import namedtuple
+from collections import deque, namedtuple
 from enum import IntEnum
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 
@@ -9,6 +10,7 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from scipy.optimize import minimize
+from timeit import default_timer as timer
 
 if TYPE_CHECKING:
     import os
@@ -337,7 +339,7 @@ class EloByLocation(RankingModel):
         away_elo = self.teams_away.setdefault(match.AID, TeamElo())
 
         played_enough = home_elo.games >= 10 and away_elo.games >= 10
-        return home_elo.predict(away_elo.rating) if played_enough else None
+        return 100 * home_elo.predict(away_elo.rating) if played_enough else None
 
     def reset(self) -> None:
         """Reset the model."""
@@ -357,9 +359,10 @@ class Model:
         self.ai = Ai()
         self.trained = False
         self.data = Data()
-        self.current_season: int = 0
-        self.new_season_game_stack: pd.DataFrame = pd.DataFrame()
-        self.new_season_budget: int = 0
+        self.season_number: int = 0
+        self.season_budget: int = 0
+        self.old_matches = pd.DataFrame()
+        self.last_retrain = 0
 
     def update_models(self, games_increment: pd.DataFrame) -> None:
         """Update models."""
@@ -378,37 +381,44 @@ class Model:
         games_increment = inc[0]
         summary = Summary(*summ.iloc[0])
 
+        games_increment_size = games_increment.shape[0]
+
         if not self.trained:
             self.train_ai_reg(games_increment)
             self.trained = True
-            self.current_season = int(games_increment.iloc[-1]["Season"])
-            self.new_season_budget = summary.Bankroll
-        elif games_increment.shape[0] > 0:
-            if self.current_season != int(games_increment.iloc[0]["Season"]):
-                self.elo.reset()
-                self.elo_by_location.reset()
-                self.current_season = int(games_increment.iloc[0]["Season"])
-                self.new_season_budget = summary.Bankroll
-            if self.new_season_game_stack.empty:
-                self.new_season_game_stack = games_increment
-            else:
-                self.new_season_game_stack = pd.concat(
-                    [self.new_season_game_stack, games_increment], ignore_index=True
-                )
+            self.season_number = int(games_increment.iloc[-1]["Season"])
+            self.season_budget = summary.Bankroll
+            self.old_matches = games_increment
+            print(f"Initial training on {games_increment.shape[0]} matches")
+        elif games_increment_size > 0:
+            increment_season = int(games_increment.iloc[0]["Season"])
+            if self.season_number != increment_season:
+                # self.elo.reset()
+                # self.elo_by_location.reset()
+                self.season_number = increment_season
+                self.season_budget = summary.Bankroll
 
-            if (
-                self.new_season_game_stack.shape[0] > 2000
-                and pd.to_datetime(summary.Date).month == 1
-            ):
-                self.train_ai_reg(self.new_season_game_stack)
-                self.new_season_game_stack = pd.DataFrame()
+            self.old_matches = pd.concat(
+                [self.old_matches.iloc[-4000:], games_increment],
+                ignore_index=True,
+            )
+
+            month = pd.to_datetime(summary.Date).month
+            if self.last_retrain != month and self.old_matches.shape[0] > 100:
+                print(
+                    f"{summary.Date}: retraining on {self.old_matches.shape[0]}"
+                    f" matches with bankroll {summary.Bankroll}"
+                )
+                self.train_ai_reg(self.old_matches)
+                self.last_retrain = month
+                self.season_budget = summary.Bankroll
 
             self.update_models(games_increment)
 
         upcoming_games: pd.DataFrame = opps[opps["Date"] == summary.Date]
 
         if upcoming_games.shape[0] != 0 and summary.Bankroll > (
-            self.new_season_budget * 0.7
+            self.season_budget * 0.9
         ):
             data_matrix = self.create_data_matrix(upcoming_games)
 
@@ -426,7 +436,7 @@ class Model:
             index=upcoming_games.index,
         )
         r = new_bets.reindex(opps.index, fill_value=0)
-        if summary.Bankroll < (self.new_season_budget * 0.7):
+        if summary.Bankroll < (self.season_budget * 0.9):
             r["BetH"] = 0
             r["BetA"] = 0
         return r
@@ -615,11 +625,7 @@ class CustomQueue:
         if self.__curent_oldest == 0:
             return 0.0
 
-        return (
-            np.sum(self.values) / min(self.size, self.__curent_oldest)
-            if self.__curent_oldest
-            else 0.0
-        )
+        return np.sum(self.values) / min(self.size, self.__curent_oldest)
 
 
 class TeamData:
