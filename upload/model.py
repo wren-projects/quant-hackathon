@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from datetime import time
 import math
-from collections import deque, namedtuple
+from collections import namedtuple
 from enum import IntEnum
-from typing import TYPE_CHECKING, Protocol, TypeAlias
+from itertools import chain, product, repeat, starmap
+from operator import add
+from typing import TYPE_CHECKING, Protocol, TypeAlias, cast
 
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 from scipy.optimize import minimize
-from timeit import default_timer as timer
 
 if TYPE_CHECKING:
     import os
@@ -66,6 +66,7 @@ Match = namedtuple(
         "HPF",
         "APF",
     ],
+    defaults=(None,) * 32,
 )
 
 Opp = namedtuple(
@@ -85,6 +86,28 @@ Opp = namedtuple(
     ],
 )
 
+
+def match_to_opp(match: Match) -> Opp:
+    """
+    Convert Match to Opp.
+
+    Fills Bets with 0.
+    """
+    return Opp(
+        Index=match.Index,
+        Season=match.Season,
+        Date=match.Date,
+        HID=match.HID,
+        AID=match.AID,
+        N=match.N,
+        POFF=match.POFF,
+        OddsH=match.OddsH,
+        OddsA=match.OddsA,
+        BetH=0,
+        BetA=0,
+    )
+
+
 Summary = namedtuple(
     "Summary",
     [
@@ -94,6 +117,223 @@ Summary = namedtuple(
         "Max_bet",
     ],
 )
+
+
+class Team(IntEnum):
+    """Enum discerning teams playing home or away."""
+
+    Home = 0
+    Away = 1
+
+
+class CustomQueue:
+    """Serve as custom version of queue."""
+
+    def __init__(self, n: int) -> None:
+        """Initialize queue."""
+        self.size: int = n
+        self.values: np.array = np.zeros((n, 1))
+        self.__curent_oldest: int = 0
+
+    def put(self, value: float) -> None:
+        """Put new value in queue."""
+        self.values[self.__curent_oldest % self.size] = value
+        self.__curent_oldest += 1
+
+    def get_q_avr(self) -> float:
+        """Return average array of each feature."""
+        if self.__curent_oldest == 0:
+            return 0.0
+
+        return np.sum(self.values) / min(self.size, self.__curent_oldest)
+
+
+class TeamData:
+    """Hold data of one team, both as home and away."""
+
+    N_SHORT = 5
+    N_LONG = 20
+
+    BASE_COLUMNS: tuple[str, ...] = (
+        "WR",
+        "WRH",
+        "WRA",
+        "PSA",
+        "PSAH",
+        "PSAA",
+        "PLTA",
+        "PLTAH",
+        "PLTAA",
+        "PD",
+        "PDH",
+        "PDA",
+    )
+
+    TEAM_COLUMNS: tuple[str, ...] = (
+        "DSLM",
+        *starmap(add, product(BASE_COLUMNS, ["_S", "_L"])),
+    )
+
+    # HACK: Python's scopes are weird, so we have to work around them with the
+    # extra repeat iterator
+    COLUMNS: tuple[tuple[str, ...], ...] = tuple(
+        tuple(starmap(add, product(team_prefix, tc)))
+        for team_prefix, tc in zip([["H_"], ["A_"]], repeat(TEAM_COLUMNS))
+    )
+
+    MATCH_COLUMNS: tuple[str, ...] = tuple(chain.from_iterable(COLUMNS))
+
+    def __init__(self, team_id: TeamID) -> None:
+        """Init datastucture."""
+        self.id: TeamID = team_id
+        self.date_last_mach: pd.Timestamp = pd.to_datetime("1975-11-06")
+
+        # short averages
+        self.win_rate_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.win_rate_home_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.win_rate_away_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+
+        self.points_scored_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_scored_average_home_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_scored_average_away_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+
+        self.points_lost_to_x_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_lost_to_x_average_home_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+        self.points_lost_to_x_average_away_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+
+        self.points_diference_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
+        self.points_diference_average_home_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+        self.points_diference_average_away_S: CustomQueue = CustomQueue(
+            TeamData.N_SHORT
+        )
+
+        # long averages
+        self.win_rate_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.win_rate_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.win_rate_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+
+        self.points_scored_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_scored_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_scored_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+
+        self.points_lost_to_x_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_lost_to_x_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_lost_to_x_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+
+        self.points_diference_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_diference_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+        self.points_diference_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
+
+    def _get_days_since_last_mach(self, today: pd.Timestamp) -> int:
+        """Return number of days scince last mach."""
+        return (today - self.date_last_mach).days
+
+    def update(self, match: Match, played_as: Team) -> None:
+        """Update team data based on data from one mach."""
+        self.date_last_mach = pd.to_datetime(match.Date)
+
+        win = match.H if played_as == Team.Home else match.A
+        points = match.HSC if played_as == Team.Home else match.ASC
+        points_lost_to = match.ASC if played_as == Team.Home else match.HSC
+        point_diference = points - points_lost_to
+
+        self.win_rate_S.put(win)
+        self.win_rate_L.put(win)
+        self.points_scored_average_S.put(points)
+        self.points_scored_average_L.put(points)
+        self.points_lost_to_x_average_S.put(points_lost_to)
+        self.points_lost_to_x_average_L.put(points_lost_to)
+        self.points_diference_average_S.put(point_diference)
+        self.points_diference_average_L.put(point_diference)
+
+        if played_as == Team.Home:
+            self.win_rate_home_S.put(win)
+            self.win_rate_home_L.put(win)
+            self.points_scored_average_home_S.put(points)
+            self.points_scored_average_home_L.put(points)
+            self.points_lost_to_x_average_home_S.put(points_lost_to)
+            self.points_lost_to_x_average_home_L.put(points_lost_to)
+            self.points_diference_average_home_S.put(point_diference)
+            self.points_diference_average_home_L.put(point_diference)
+        else:
+            self.win_rate_away_S.put(win)
+            self.win_rate_away_L.put(win)
+            self.points_scored_average_away_S.put(points)
+            self.points_scored_average_away_L.put(points)
+            self.points_lost_to_x_average_away_S.put(points_lost_to)
+            self.points_lost_to_x_average_away_L.put(points_lost_to)
+            self.points_diference_average_away_S.put(point_diference)
+            self.points_diference_average_away_L.put(point_diference)
+
+    def get_data_series(self, date: pd.Timestamp, team: Team) -> pd.Series:
+        """Return complete data vector for given team."""
+        return pd.Series(
+            [
+                self._get_days_since_last_mach(date),
+                self.win_rate_S.get_q_avr(),
+                self.win_rate_L.get_q_avr(),
+                self.win_rate_home_S.get_q_avr(),
+                self.win_rate_home_L.get_q_avr(),
+                self.win_rate_away_S.get_q_avr(),
+                self.win_rate_away_L.get_q_avr(),
+                self.points_scored_average_S.get_q_avr(),
+                self.points_scored_average_L.get_q_avr(),
+                self.points_scored_average_home_S.get_q_avr(),
+                self.points_scored_average_away_L.get_q_avr(),
+                self.points_scored_average_home_L.get_q_avr(),
+                self.points_scored_average_away_S.get_q_avr(),
+                self.points_lost_to_x_average_S.get_q_avr(),
+                self.points_lost_to_x_average_L.get_q_avr(),
+                self.points_lost_to_x_average_home_S.get_q_avr(),
+                self.points_lost_to_x_average_home_L.get_q_avr(),
+                self.points_lost_to_x_average_away_S.get_q_avr(),
+                self.points_lost_to_x_average_away_L.get_q_avr(),
+                self.points_diference_average_S.get_q_avr(),
+                self.points_diference_average_L.get_q_avr(),
+                self.points_diference_average_home_S.get_q_avr(),
+                self.points_diference_average_home_L.get_q_avr(),
+                self.points_diference_average_away_S.get_q_avr(),
+                self.points_diference_average_away_L.get_q_avr(),
+            ],
+            index=pd.Index(self.COLUMNS[team]),
+        )
+
+
+class Data:
+    """Class for working with data."""
+
+    def __init__(self) -> None:
+        """Create Data from csv file."""
+        self.teams: dict[TeamID, TeamData] = {}
+
+    def add_match(self, match: Match) -> None:
+        """Update team data based on data from one mach."""
+        self.teams.setdefault(match.HID, TeamData(match.HID)).update(match, Team.Home)
+        self.teams.setdefault(match.AID, TeamData(match.AID)).update(match, Team.Away)
+
+    def team_data(self, team_id: TeamID) -> TeamData:
+        """Return the TeamData for given team."""
+        return self.teams[team_id]
+
+    def get_match_parameters(self, match: Opp) -> pd.Series:
+        """Get array for match."""
+        home_team = self.teams.setdefault(match.HID, TeamData(match.HID))
+        away_team = self.teams.setdefault(match.AID, TeamData(match.AID))
+
+        date: pd.Timestamp = pd.to_datetime(match.Date)
+
+        return pd.concat(
+            [
+                home_team.get_data_series(date, Team.Home),
+                away_team.get_data_series(date, Team.Away),
+            ]
+        )
 
 
 class Player:
@@ -147,7 +387,8 @@ class Player:
         ratios = np.array(active_matches[["OddsH", "OddsA"]])
         initial_props = np.full_like(probabilities, 0.01, dtype=float)
 
-        # Constraint: sum of all props <= 1 (global budget constraint for entire 2D array)
+        # Constraint: sum of all props <= 1
+        # (global budget constraint for entire 2D array)
         cons = [
             {"type": "ineq", "fun": lambda props: 1.0 - sum(props)}
         ]  # Global budget constraint
@@ -174,13 +415,13 @@ class Player:
 
     def get_betting_strategy(
         self,
-        probabilities: np.ndarray,
+        probabilities: pd.DataFrame,
         active_matches: pd.DataFrame,
         summary: Summary,
     ) -> np.ndarray:
-        """Return absolute cash numbers and on what to bet in 2d list. Probabilities 2d array."""
+        """Return absolute cash numbers and on what to bet in 2d list."""
         proportions: list[float] = (
-            self.get_bet_proportions(probabilities, active_matches, summary)
+            self.get_bet_proportions(probabilities.to_numpy(), active_matches, summary)
             * summary.Bankroll
         )
         return np.array(proportions).round(decimals=0)
@@ -361,7 +602,8 @@ class Model:
         self.data = Data()
         self.season_number: int = 0
         self.season_budget: int = 0
-        self.old_matches = pd.DataFrame()
+        self.old_matches: pd.DataFrame = pd.DataFrame()
+        self.old_outcomes: pd.Series = pd.Series()
         self.last_retrain = 0
 
     def update_models(self, games_increment: pd.DataFrame) -> None:
@@ -388,8 +630,10 @@ class Model:
             self.trained = True
             self.season_number = int(games_increment.iloc[-1]["Season"])
             self.season_budget = summary.Bankroll
-            self.old_matches = games_increment
+            self.old_matches = self.create_data_matrix(games_increment)
+            self.old_outcomes = games_increment.HSC - games_increment.ASC
             print(f"Initial training on {games_increment.shape[0]} matches")
+
         elif games_increment_size > 0:
             increment_season = int(games_increment.iloc[0]["Season"])
             if self.season_number != increment_season:
@@ -399,8 +643,22 @@ class Model:
                 self.season_budget = summary.Bankroll
 
             self.old_matches = pd.concat(
-                [self.old_matches.iloc[-4000:], games_increment],
+                [
+                    self.old_matches.iloc[-4000:],
+                    self.create_data_matrix(games_increment),
+                ],
                 ignore_index=True,
+            )
+
+            self.old_outcomes = cast(
+                pd.Series,
+                pd.concat(
+                    [
+                        self.old_outcomes.iloc[-4000:],
+                        games_increment.HSC - games_increment.ASC,
+                    ],
+                    ignore_index=True,
+                ),
             )
 
             month = pd.to_datetime(summary.Date).month
@@ -409,13 +667,13 @@ class Model:
                     f"{summary.Date}: retraining on {self.old_matches.shape[0]}"
                     f" matches with bankroll {summary.Bankroll}"
                 )
-                self.train_ai_reg(self.old_matches)
+                self.ai.train_reg(self.old_matches, self.old_outcomes)
                 self.last_retrain = month
                 self.season_budget = summary.Bankroll
 
             self.update_models(games_increment)
 
-        upcoming_games: pd.DataFrame = opps[opps["Date"] == summary.Date]
+        upcoming_games = cast(pd.DataFrame, opps[opps["Date"] == summary.Date])
 
         if upcoming_games.shape[0] != 0 and summary.Bankroll > (
             self.season_budget * 0.9
@@ -441,77 +699,92 @@ class Model:
             r["BetA"] = 0
         return r
 
-    def create_data_matrix(self, upcoming_games: pd.DataFrame) -> np.ndarray:
+    RANKING_COLUMNS: tuple[str, ...] = (
+        "HomeElo",
+        "AwayElo",
+        "EloByLocation",
+        "OddsH",
+        "OddsA",
+    )
+    MATCH_PARAMETERS = len(TeamData.COLUMNS) + len(RANKING_COLUMNS)
+    TRAINING_DATA_COLUMNS: tuple[str, ...] = (*RANKING_COLUMNS, *TeamData.MATCH_COLUMNS)
+
+    def create_data_matrix(self, upcoming_games: pd.DataFrame) -> pd.DataFrame:
         """Get matches to predict outcome for."""
-        data_matrix = np.ndarray([upcoming_games.shape[0], 55])
+        return cast(
+            pd.DataFrame,
+            upcoming_games.apply(
+                lambda x: self.get_match_parameters(match_to_opp(Match(0, *x))),
+                axis=1,
+            ),
+        )
 
-        upcoming_games = upcoming_games.reset_index(drop=True)
+    def get_match_parameters(self, match: Opp) -> pd.Series:
+        """Get parameters for given match."""
+        home_elo = self.elo.team_rating(match.HID)
+        away_elo = self.elo.team_rating(match.AID)
+        elo_by_location_prediction = self.elo_by_location.predict(match)
 
-        for match in (Opp(*row) for row in upcoming_games.itertuples(index=True)):
-            home_elo = self.elo.team_rating(match.HID)
-            away_elo = self.elo.team_rating(match.AID)
-            elo_by_location_prediction = self.elo_by_location.predict(match)
-
-            data_matrix[match.Index] = [
+        rankings = pd.Series(
+            [
                 home_elo,
                 away_elo,
                 elo_by_location_prediction,
                 match.OddsH,
                 match.OddsA,
-                *self.data.get_match_array(match),
-            ]
+            ],
+            index=self.RANKING_COLUMNS,
+        )
 
-        return data_matrix
+        data_parameters = self.data.get_match_parameters(match)
+
+        return pd.concat([rankings, data_parameters], axis=0)
 
     def train_ai(self, dataframe: pd.DataFrame) -> None:
         """Train AI."""
-        train_matrix = np.ndarray([dataframe.shape[0], 56])
+        training_data = []
+        outcomes_list = []
 
         for match in (Match(*x) for x in dataframe.itertuples()):
-            home_elo = self.elo.team_rating(match.HID)
-            away_elo = self.elo.team_rating(match.AID)
-            elo_by_location_prediction = self.elo_by_location.predict(match)
+            match_parameters = self.get_match_parameters(match_to_opp(match))
 
-            train_matrix[match.Index] = [
-                home_elo,
-                away_elo,
-                elo_by_location_prediction,
-                match.OddsH,
-                match.OddsA,
-                *self.data.get_match_array(match),
-                match.H,
-            ]
+            training_data.append(match_parameters)
+            outcomes_list.append(match.H)
 
             self.data.add_match(match)
             self.elo.add_match(match)
             self.elo_by_location.add_match(match)
 
-        self.ai.train(train_matrix)
+        training_dataframe = pd.DataFrame(
+            training_data, columns=pd.Index(self.TRAINING_DATA_COLUMNS)
+        )
+
+        outcomes = pd.Series(outcomes_list)
+
+        self.ai.train(training_dataframe, outcomes)
 
     def train_ai_reg(self, dataframe: pd.DataFrame) -> None:
         """Train AI."""
-        train_matrix = np.ndarray([dataframe.shape[0], 56])
+        training_data = []
+        outcomes_list = []
 
         for match in (Match(*x) for x in dataframe.itertuples()):
-            home_elo = self.elo.team_rating(match.HID)
-            away_elo = self.elo.team_rating(match.AID)
-            elo_by_location_prediction = self.elo_by_location.predict(match)
+            match_parameters = self.get_match_parameters(match_to_opp(match))
 
-            train_matrix[match.Index] = [
-                home_elo,
-                away_elo,
-                elo_by_location_prediction,
-                match.OddsH,
-                match.OddsA,
-                *self.data.get_match_array(match),
-                match.HSC - match.ASC,
-            ]
+            training_data.append(match_parameters)
+            outcomes_list.append(match.HSC - match.ASC)
 
             self.data.add_match(match)
             self.elo.add_match(match)
             self.elo_by_location.add_match(match)
 
-        self.ai.train_reg(train_matrix)
+        training_dataframe = pd.DataFrame(
+            training_data, columns=pd.Index(self.TRAINING_DATA_COLUMNS)
+        )
+
+        outcomes = pd.Series(outcomes_list)
+
+        self.ai.train_reg(training_dataframe, outcomes)
 
 
 def calculate_elo_accuracy(data: list[list[int]]) -> float:
@@ -539,254 +812,57 @@ def calculate_elo_accuracy(data: list[list[int]]) -> float:
 class Ai:
     """Class for training and predicting."""
 
-    model: xgb.XGBRegressor
+    model: xgb.XGBRegressor | xgb.XGBClassifier
 
     def __init__(self):
         """Create a new Model from a XGBClassifier."""
+        self.initialized = False
+
+    def train(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
+        """Return trained model."""
+        if self.initialized:
+            self.model = self.model.fit(training_dataframe, outcomes)
+            return
+
         self.model = xgb.XGBClassifier()
-        self.trained = False
+        self.model.fit(training_dataframe, outcomes)
+        self.initialized = True
 
-    def train(self, train_matrix: np.ndarray) -> None:
+    def train_reg(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
         """Return trained model."""
-        if self.trained:
-            self.model = self.model.fit(
-                train_matrix[:, :-1],
-                train_matrix[:, -1],
-            )
+        if self.initialized:
+            self.model = self.model.fit(training_dataframe, outcomes)
             return
-        self.model.fit(train_matrix[:, :-1], train_matrix[:, -1])
-        self.trained = True
 
-    def train_reg(self, train_matrix: np.ndarray) -> None:
-        """Return trained model."""
-        if self.trained:
-            self.model = self.model.fit(
-                train_matrix[-2000:, :-1],
-                train_matrix[-2000:, -1],
-            )
-            return
         self.model = xgb.XGBRegressor(objective="reg:squarederror")
-        if len(train_matrix) > 2005:
-            self.model.fit(train_matrix[-2000:, :-1], train_matrix[-2000:, -1])
-        else:
-            self.model.fit(train_matrix[:, :-1], train_matrix[:, -1])
-        self.trained = True
+        self.model.fit(training_dataframe.to_numpy(), outcomes.to_numpy())
+        self.initialized = True
 
-    def get_probabilities(self, data_matrix: np.ndarray) -> np.ndarray:
+    def get_probabilities(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
-        return np.array(self.model.predict_proba(data_matrix))[:, ::-1]
+        return self.model.predict_proba(dataframe)
 
-    def get_probabilities_reg(self, data_matrix: np.ndarray) -> np.ndarray:
+    def get_probabilities_reg(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
-        predicted_dif_score = np.array(self.model.predict(data_matrix))
-        return self.calculate_probabilities(predicted_dif_score)[:, ::-1]
+        predicted_score_differences = self.model.predict(dataframe)
+        return self.calculate_probabilities(predicted_score_differences)
 
     def save_model(self, path: os.PathLike) -> None:
         """Save ML model."""
         self.model.save_model(path)
 
-    def home_team_win_probability(self, point_difference: float) -> float:
+    def home_team_win_probability(self, score_difference: float) -> float:
+        """Calculate the probability of home team winning based on score difference."""
         slope = 0.8  # range optimal 0.1 to 1. liked 0.3 and 0.5 (maybe 1)
-        return 1 / (1 + np.exp(-slope * point_difference))
+        return 1 / (1 + np.exp(-slope * score_difference))
 
-    def calculate_probabilities(self, score_differences: np.ndarray) -> np.ndarray:
-        """Calculate the probabilities of home and away teams winning based on score differences."""
-        probabilities = np.zeros((len(score_differences), 2))
-        for i, diff in enumerate(score_differences):
-            home_prob = self.home_team_win_probability(diff)
+    def calculate_probabilities(self, score_differences: np.ndarray) -> pd.DataFrame:
+        """Calculate the probabilities of teams winning based on score differences."""
+        probabilities = []
+
+        for score_difference in score_differences:
+            home_prob = self.home_team_win_probability(score_difference)
             away_prob = 1 - home_prob
-            probabilities[i] = [away_prob, home_prob]
-        return probabilities
+            probabilities.append((away_prob, home_prob))
 
-
-class Team(IntEnum):
-    """Enum discerning teams playing home or away."""
-
-    Home = 0
-    Away = 1
-
-
-class CustomQueue:
-    """Serve as custom version of queue."""
-
-    def __init__(self, n: int) -> None:
-        """Initialize queue."""
-        self.size: int = n
-        self.values: np.array = np.zeros((n, 1))
-        self.__curent_oldest: int = 0
-
-    def put(self, value: float) -> None:
-        """Put new value in queue."""
-        self.values[self.__curent_oldest % self.size] = value
-        self.__curent_oldest += 1
-
-    def get_q_avr(self) -> float:
-        """Return average array of each feature."""
-        if self.__curent_oldest == 0:
-            return 0.0
-
-        return np.sum(self.values) / min(self.size, self.__curent_oldest)
-
-
-class TeamData:
-    """Hold data of one team, both as home and away."""
-
-    N_SHORT = 5
-    N_LONG = 20
-
-    COLUMNS = 3
-
-    def __init__(self, team_id: TeamID) -> None:
-        """Init datastucture."""
-        self.id: TeamID = team_id
-        self.date_last_mach: pd.Timestamp = pd.to_datetime("1975-11-06")
-
-        # short averages
-        self.win_rate_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
-        self.win_rate_home_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
-        self.win_rate_away_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
-
-        self.points_scored_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
-        self.points_scored_average_home_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
-        self.points_scored_average_away_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
-
-        self.points_lost_to_x_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
-        self.points_lost_to_x_average_home_S: CustomQueue = CustomQueue(
-            TeamData.N_SHORT
-        )
-        self.points_lost_to_x_average_away_S: CustomQueue = CustomQueue(
-            TeamData.N_SHORT
-        )
-
-        self.points_diference_average_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
-        self.points_diference_average_home_S: CustomQueue = CustomQueue(
-            TeamData.N_SHORT
-        )
-        self.points_diference_average_away_S: CustomQueue = CustomQueue(
-            TeamData.N_SHORT
-        )
-
-        # long averages
-        self.win_rate_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-        self.win_rate_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-        self.win_rate_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-
-        self.points_scored_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-        self.points_scored_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-        self.points_scored_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-
-        self.points_lost_to_x_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-        self.points_lost_to_x_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-        self.points_lost_to_x_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-
-        self.points_diference_average_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-        self.points_diference_average_home_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-        self.points_diference_average_away_L: CustomQueue = CustomQueue(TeamData.N_LONG)
-
-    def _get_days_since_last_mach(self, today: pd.Timestamp) -> int:
-        """Return number of days scince last mach."""
-        return (today - self.date_last_mach).days
-
-    def update(self, match: Match, played_as: Team) -> None:
-        """Update team data based on data from one mach."""
-        self.date_last_mach = pd.to_datetime(match.Date)
-
-        win = match.H if played_as == Team.Home else match.A
-        points = match.HSC if played_as == Team.Home else match.ASC
-        points_lost_to = match.ASC if played_as == Team.Home else match.HSC
-        point_diference = points - points_lost_to
-
-        self.win_rate_S.put(win)
-        self.win_rate_L.put(win)
-        self.points_scored_average_S.put(points)
-        self.points_scored_average_L.put(points)
-        self.points_lost_to_x_average_S.put(points_lost_to)
-        self.points_lost_to_x_average_L.put(points_lost_to)
-        self.points_diference_average_S.put(point_diference)
-        self.points_diference_average_L.put(point_diference)
-
-        if played_as == Team.Home:
-            self.win_rate_home_S.put(win)
-            self.win_rate_home_L.put(win)
-            self.points_scored_average_home_S.put(points)
-            self.points_scored_average_home_L.put(points)
-            self.points_lost_to_x_average_home_S.put(points_lost_to)
-            self.points_lost_to_x_average_home_L.put(points_lost_to)
-            self.points_diference_average_home_S.put(point_diference)
-            self.points_diference_average_home_L.put(point_diference)
-        else:
-            self.win_rate_away_S.put(win)
-            self.win_rate_away_L.put(win)
-            self.points_scored_average_away_S.put(points)
-            self.points_scored_average_away_L.put(points)
-            self.points_lost_to_x_average_away_S.put(points_lost_to)
-            self.points_lost_to_x_average_away_L.put(points_lost_to)
-            self.points_diference_average_away_S.put(point_diference)
-            self.points_diference_average_away_L.put(point_diference)
-
-    def get_data_vector(self, date: pd.Timestamp) -> np.ndarray:
-        """Return complete data vector for given team."""
-        return np.array(
-            [
-                self._get_days_since_last_mach(date),
-                self.win_rate_S.get_q_avr(),
-                self.win_rate_home_S.get_q_avr(),
-                self.win_rate_away_S.get_q_avr(),
-                self.points_scored_average_S.get_q_avr(),
-                self.points_scored_average_home_S.get_q_avr(),
-                self.points_scored_average_away_S.get_q_avr(),
-                self.points_lost_to_x_average_S.get_q_avr(),
-                self.points_lost_to_x_average_home_S.get_q_avr(),
-                self.points_lost_to_x_average_away_S.get_q_avr(),
-                self.points_diference_average_S.get_q_avr(),
-                self.points_diference_average_home_S.get_q_avr(),
-                self.points_diference_average_away_S.get_q_avr(),
-                self.win_rate_L.get_q_avr(),
-                self.win_rate_home_L.get_q_avr(),
-                self.win_rate_away_L.get_q_avr(),
-                self.points_scored_average_L.get_q_avr(),
-                self.points_scored_average_home_L.get_q_avr(),
-                self.points_scored_average_away_L.get_q_avr(),
-                self.points_lost_to_x_average_L.get_q_avr(),
-                self.points_lost_to_x_average_home_L.get_q_avr(),
-                self.points_lost_to_x_average_away_L.get_q_avr(),
-                self.points_diference_average_L.get_q_avr(),
-                self.points_diference_average_home_L.get_q_avr(),
-                self.points_diference_average_away_L.get_q_avr(),
-            ]
-        )
-
-
-class Data:
-    """Class for working with data."""
-
-    def __init__(self) -> None:
-        """Create Data from csv file."""
-        self.teams: dict[TeamID, TeamData] = {}
-
-    def add_match(self, match: Match) -> None:
-        """Update team data based on data from one mach."""
-        self.teams.setdefault(match.HID, TeamData(match.HID)).update(match, Team.Home)
-        self.teams.setdefault(match.AID, TeamData(match.AID)).update(match, Team.Away)
-
-    def team_data(self, team_id: TeamID) -> TeamData:
-        """Return the TeamData for given team."""
-        return self.teams[team_id]
-
-    def get_match_array(self, match: Match) -> np.ndarray:
-        """Get array for match."""
-        home_team = self.teams.setdefault(match.HID, TeamData(match.HID))
-        away_team = self.teams.setdefault(match.AID, TeamData(match.AID))
-
-        date: pd.Timestamp = pd.to_datetime(match.Date)
-
-        return np.array(
-            [
-                *home_team.get_data_vector(date),
-                *away_team.get_data_vector(date),
-            ]
-        )
-
-
-if __name__ == "__main__":
-    pass
+        return pd.DataFrame(probabilities, columns=pd.Index(["WinAway", "WinHome"]))
