@@ -859,6 +859,6 @@ class Ai:
         for score_difference in score_differences:
             home_prob = self.home_team_win_probability(score_difference)
             away_prob = 1 - home_prob
-            probabilities.append((away_prob, home_prob))
+            probabilities.append((home_prob, away_prob))
 
-        return pd.DataFrame(probabilities, columns=pd.Index(["WinAway", "WinHome"]))
+        return pd.DataFrame(probabilities, columns=pd.Index(["WinHome", "WinAway"]))
