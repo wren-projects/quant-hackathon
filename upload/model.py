@@ -591,7 +591,8 @@ class EloByLocation(RankingModel):
 class Model:
     """Main class."""
 
-    RETRAIN_SIZE: int = 4000
+    TRAIN_SIZE: int = 2000
+    FIRST_TRAIN_MOD: int = 4
 
     def __init__(self) -> None:
         """Init classes."""
@@ -603,7 +604,7 @@ class Model:
         self.trained = False
         self.data = Data()
         self.season_number: int = 0
-        self.season_budget: int = 0
+        self.budget: int = 0
         self.old_matches: pd.DataFrame = pd.DataFrame()
         self.old_outcomes: pd.Series = pd.Series()
         self.last_retrain = 0
@@ -625,20 +626,17 @@ class Model:
         games_increment = inc[0]
         summary = Summary(*summ.iloc[0])
 
-        if games_increment.shape[0] == 0:
-            return pd.DataFrame()
-
         if not self.trained:
+            train_size = self.TRAIN_SIZE * self.FIRST_TRAIN_MOD
             print(
-                f"Initial training on {games_increment.shape[0]}"
+                f"Initial training on {games_increment[-train_size :].shape[0]}"
                 f" matches with bankroll {summary.Bankroll}"
             )
-            # print(games_increment.head(15))
-            self.train_ai_reg(games_increment)
+            self.train_ai_reg(cast(pd.DataFrame, games_increment[-train_size:]))
         elif games_increment.shape[0] > 0:
             self.old_matches = pd.concat(
                 [
-                    self.old_matches.iloc[-self.RETRAIN_SIZE :],
+                    self.old_matches.iloc[-self.TRAIN_SIZE :],
                     self.create_dataframe(games_increment),
                 ],
             )
@@ -647,7 +645,7 @@ class Model:
                 pd.Series,
                 pd.concat(
                     [
-                        self.old_outcomes.iloc[-self.RETRAIN_SIZE :],
+                        self.old_outcomes.iloc[-self.TRAIN_SIZE :],
                         games_increment.HSC - games_increment.ASC,
                     ],
                 ),
@@ -659,20 +657,15 @@ class Model:
                     f"{summary.Date}: retraining on {self.old_matches.shape[0]}"
                     f" matches with bankroll {summary.Bankroll}"
                 )
-                # print(self.old_matches.head(15))
-                # print(self.old_outcomes.head(15))
-
                 self.ai.train_reg(self.old_matches, self.old_outcomes)
                 self.last_retrain = month
-                self.season_budget = summary.Bankroll
+                self.budget = summary.Bankroll
 
             self.update_models(games_increment)
 
         active_matches = cast(pd.DataFrame, opps[opps["Date"] == summary.Date])
 
-        if active_matches.shape[0] == 0 or summary.Bankroll < (
-            self.season_budget * 0.9
-        ):
+        if active_matches.shape[0] == 0 or summary.Bankroll < (self.budget * 0.9):
             return pd.DataFrame(
                 data=0,
                 index=np.arange(active_matches.shape[0]),
