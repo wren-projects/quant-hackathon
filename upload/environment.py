@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from typing import Protocol
+
 import numpy as np
 import pandas as pd
 
 
-class IModel:
+class IModel(Protocol):
     def place_bets(
         self, summary: pd.DataFrame, opps: pd.DataFrame, inc: pd.DataFrame
     ) -> pd.DataFrame:
@@ -13,14 +15,17 @@ class IModel:
 
 class Environment:
     result_cols = ["H", "A"]
+
     odds_cols = ["OddsH", "OddsA"]
+
     bet_cols = ["BetH", "BetA"]
+
     score_cols = ["HSC", "ASC"]
 
     # fmt: off
     feature_cols = [
-        "HFGM", "AFGM", "HFGA", "AFGA", "HFG3M", "AFG3M", "HFG3A", "AFG3A", "HFTM",
-        "AFTM", "HFTA", "AFTA", "HORB", "AORB", "HDRB", "ADRB", "HRB", "ARB", "HAST",
+        "HFGM", "AFGM", "HFGA", "AFGA", "HFG3M", "AFG3M", "HFG3A", "AFG3A",
+        "HFTM", "AFTM", "HFTA", "AFTA", "HORB", "AORB", "HDRB", "ADRB", "HRB", "ARB", "HAST",
         "AAST", "HSTL", "ASTL", "HBLK", "ABLK", "HTOV", "ATOV", "HPF", "APF",
     ]
     # fmt: on
@@ -66,7 +71,7 @@ class Environment:
             # get betting options for current day
             # today's games + next day(s) games -> self.odds_availability
             opps = self._get_options(date)
-            if opps.empty:
+            if opps.empty and inc[0].empty and inc[1].empty:
                 continue
 
             summary = self._generate_summary(date)
