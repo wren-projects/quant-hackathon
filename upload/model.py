@@ -186,7 +186,7 @@ class TeamData:
     def __init__(self, team_id: TeamID) -> None:
         """Init datastucture."""
         self.id: TeamID = team_id
-        self.date_last_mach: pd.Timestamp = pd.to_datetime("1975-11-06")
+        self.date_last_match: pd.Timestamp = pd.to_datetime("1977-11-10")
 
         # short averages
         self.win_rate_S: CustomQueue = CustomQueue(TeamData.N_SHORT)
@@ -232,11 +232,11 @@ class TeamData:
 
     def _get_days_since_last_mach(self, today: pd.Timestamp) -> int:
         """Return number of days scince last mach."""
-        return (today - self.date_last_mach).days
+        return (today - self.date_last_match).days
 
     def update(self, match: Match, played_as: Team) -> None:
         """Update team data based on data from one mach."""
-        self.date_last_mach = pd.to_datetime(match.Date)
+        self.date_last_match = pd.to_datetime(match.Date)
 
         win = match.H if played_as == Team.Home else match.A
         points = match.HSC if played_as == Team.Home else match.ASC
@@ -591,6 +591,8 @@ class EloByLocation(RankingModel):
 class Model:
     """Main class."""
 
+    RETRAIN_SIZE: int = 4000
+
     def __init__(self) -> None:
         """Init classes."""
         self.seen_matches = set()
@@ -623,81 +625,71 @@ class Model:
         games_increment = inc[0]
         summary = Summary(*summ.iloc[0])
 
-        games_increment_size = games_increment.shape[0]
+        if games_increment.shape[0] == 0:
+            return pd.DataFrame()
 
         if not self.trained:
+            print(
+                f"Initial training on {games_increment.shape[0]}"
+                f" matches with bankroll {summary.Bankroll}"
+            )
+            # print(games_increment.head(15))
             self.train_ai_reg(games_increment)
-            self.trained = True
-            self.season_number = int(games_increment.iloc[-1]["Season"])
-            self.season_budget = summary.Bankroll
-            self.old_matches = self.create_data_matrix(games_increment)
-            self.old_outcomes = games_increment.HSC - games_increment.ASC
-            print(f"Initial training on {games_increment.shape[0]} matches")
-
-        elif games_increment_size > 0:
-            increment_season = int(games_increment.iloc[0]["Season"])
-            if self.season_number != increment_season:
-                # self.elo.reset()
-                # self.elo_by_location.reset()
-                self.season_number = increment_season
-                self.season_budget = summary.Bankroll
-
+        elif games_increment.shape[0] > 0:
             self.old_matches = pd.concat(
                 [
-                    self.old_matches.iloc[-4000:],
-                    self.create_data_matrix(games_increment),
+                    self.old_matches.iloc[-self.RETRAIN_SIZE :],
+                    self.create_dataframe(games_increment),
                 ],
-                ignore_index=True,
             )
 
             self.old_outcomes = cast(
                 pd.Series,
                 pd.concat(
                     [
-                        self.old_outcomes.iloc[-4000:],
+                        self.old_outcomes.iloc[-self.RETRAIN_SIZE :],
                         games_increment.HSC - games_increment.ASC,
                     ],
-                    ignore_index=True,
                 ),
             )
 
             month = pd.to_datetime(summary.Date).month
-            if self.last_retrain != month and self.old_matches.shape[0] > 100:
+            if self.last_retrain != month:
                 print(
                     f"{summary.Date}: retraining on {self.old_matches.shape[0]}"
                     f" matches with bankroll {summary.Bankroll}"
                 )
+                # print(self.old_matches.head(15))
+                # print(self.old_outcomes.head(15))
+
                 self.ai.train_reg(self.old_matches, self.old_outcomes)
                 self.last_retrain = month
                 self.season_budget = summary.Bankroll
 
             self.update_models(games_increment)
 
-        upcoming_games = cast(pd.DataFrame, opps[opps["Date"] == summary.Date])
+        active_matches = cast(pd.DataFrame, opps[opps["Date"] == summary.Date])
 
-        if upcoming_games.shape[0] != 0 and summary.Bankroll > (
+        if active_matches.shape[0] == 0 or summary.Bankroll < (
             self.season_budget * 0.9
         ):
-            data_matrix = self.create_data_matrix(upcoming_games)
-
-            probabilities = self.ai.get_probabilities_reg(data_matrix)
-
-            bets = self.player.get_betting_strategy(
-                probabilities, upcoming_games, summary
+            return pd.DataFrame(
+                data=0,
+                index=np.arange(active_matches.shape[0]),
+                columns=pd.Index(["BetH", "BetA"], dtype="str"),
             )
 
-        else:
-            bets = []
+        dataframe = self.create_dataframe(active_matches)
+        probabilities = self.ai.get_probabilities_reg(dataframe)
+        bets = self.player.get_betting_strategy(probabilities, active_matches, summary)
+
         new_bets = pd.DataFrame(
             data=bets,
             columns=pd.Index(["BetH", "BetA"], dtype="str"),
-            index=upcoming_games.index,
+            index=active_matches.index,
         )
-        r = new_bets.reindex(opps.index, fill_value=0)
-        if summary.Bankroll < (self.season_budget * 0.9):
-            r["BetH"] = 0
-            r["BetA"] = 0
-        return r
+
+        return new_bets.reindex(opps.index, fill_value=0)
 
     RANKING_COLUMNS: tuple[str, ...] = (
         "HomeElo",
@@ -709,11 +701,11 @@ class Model:
     MATCH_PARAMETERS = len(TeamData.COLUMNS) + len(RANKING_COLUMNS)
     TRAINING_DATA_COLUMNS: tuple[str, ...] = (*RANKING_COLUMNS, *TeamData.MATCH_COLUMNS)
 
-    def create_data_matrix(self, upcoming_games: pd.DataFrame) -> pd.DataFrame:
+    def create_dataframe(self, active_matches: pd.DataFrame) -> pd.DataFrame:
         """Get matches to predict outcome for."""
         return cast(
             pd.DataFrame,
-            upcoming_games.apply(
+            active_matches.apply(
                 lambda x: self.get_match_parameters(match_to_opp(Match(0, *x))),
                 axis=1,
             ),
@@ -761,7 +753,11 @@ class Model:
 
         outcomes = pd.Series(outcomes_list)
 
+        self.old_matches = training_dataframe
+        self.old_outcomes = outcomes
+
         self.ai.train(training_dataframe, outcomes)
+        self.trained = True
 
     def train_ai_reg(self, dataframe: pd.DataFrame) -> None:
         """Train AI."""
@@ -784,7 +780,11 @@ class Model:
 
         outcomes = pd.Series(outcomes_list)
 
+        self.old_matches = training_dataframe
+        self.old_outcomes = outcomes
+
         self.ai.train_reg(training_dataframe, outcomes)
+        self.trained = True
 
 
 def calculate_elo_accuracy(data: list[list[int]]) -> float:
@@ -820,23 +820,19 @@ class Ai:
 
     def train(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
         """Return trained model."""
-        if self.initialized:
-            self.model = self.model.fit(training_dataframe, outcomes)
-            return
+        if not self.initialized:
+            self.model = xgb.XGBClassifier()
+            self.initialized = True
 
-        self.model = xgb.XGBClassifier()
-        self.model.fit(training_dataframe, outcomes)
-        self.initialized = True
+        self.model = self.model.fit(training_dataframe, outcomes)
 
     def train_reg(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
         """Return trained model."""
-        if self.initialized:
-            self.model = self.model.fit(training_dataframe, outcomes)
-            return
+        if not self.initialized:
+            self.model = xgb.XGBRegressor(objective="reg:squarederror")
+            self.initialized = True
 
-        self.model = xgb.XGBRegressor(objective="reg:squarederror")
-        self.model.fit(training_dataframe.to_numpy(), outcomes.to_numpy())
-        self.initialized = True
+        self.model.fit(training_dataframe, outcomes)
 
     def get_probabilities(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
