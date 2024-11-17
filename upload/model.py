@@ -593,7 +593,7 @@ class Model:
     """Main class."""
 
     TRAIN_SIZE: int = 2000
-    FIRST_TRAIN_MOD: int = 4
+    FIRST_TRAIN_MOD: int = 1
 
     def __init__(self) -> None:
         """Init classes."""
@@ -629,10 +629,10 @@ class Model:
 
         if not self.trained:
             train_size = self.TRAIN_SIZE * self.FIRST_TRAIN_MOD
-            print(
+            """print(
                 f"Initial training on {games_increment[-train_size :].shape[0]}"
                 f" matches with bankroll {summary.Bankroll}"
-            )
+            )"""
             self.train_ai_reg(cast(pd.DataFrame, games_increment[-train_size:]))
         elif games_increment.shape[0] > 0:
             increment_season = int(games_increment.iloc[0]["Season"])
@@ -660,10 +660,10 @@ class Model:
 
             month = pd.to_datetime(summary.Date).month
             if self.last_retrain != month:
-                print(
+                """print(
                     f"{summary.Date}: retraining on {self.old_matches.shape[0]}"
                     f" matches with bankroll {summary.Bankroll}"
-                )
+                )"""
                 self.ai.train_reg(self.old_matches, self.old_outcomes)
                 self.last_retrain = month
                 self.budget = summary.Bankroll
@@ -827,7 +827,7 @@ class Ai:
         if not self.initialized:
             self.model = xgb.XGBRegressor(objective="reg:squarederror", max_depth=10)
             self.initialized = True
-            print(training_dataframe.columns)
+            #print(training_dataframe.columns)
 
         x_train, x_val, y_train, y_val = model_selection.train_test_split(
             training_dataframe.to_numpy(),
@@ -836,10 +836,10 @@ class Ai:
             random_state=2,
             shuffle=True,
         )
-        print(x_train.shape)
+        #print(x_train.shape)
         self.model.fit(x_train, y_train)
-        print("MAE:", metrics.mean_absolute_error(y_val, self.model.predict(x_val)))
-        print(self.model.feature_importances_)
+        #print("MAE:", metrics.mean_absolute_error(y_val, self.model.predict(x_val)))
+        #print(self.model.feature_importances_)
 
     def get_probabilities(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
