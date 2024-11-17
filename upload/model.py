@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from scipy.optimize import minimize
-from sklearn import model_selection, metrics
+from sklearn import metrics, model_selection
 
 if TYPE_CHECKING:
     import os
@@ -825,17 +825,21 @@ class Ai:
     def train_reg(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
         """Return trained model."""
         if not self.initialized:
-            self.model = xgb.XGBRegressor(objective="reg:squarederror", max_depth = 10)
+            self.model = xgb.XGBRegressor(objective="reg:squarederror", max_depth=10)
             self.initialized = True
             print(training_dataframe.columns)
 
-        x_train, x_val, y_train, y_val = model_selection.train_test_split(training_dataframe.to_numpy(), outcomes.to_numpy(), test_size=0.01, random_state=2, shuffle=True)
+        x_train, x_val, y_train, y_val = model_selection.train_test_split(
+            training_dataframe.to_numpy(),
+            outcomes.to_numpy(),
+            test_size=0.01,
+            random_state=2,
+            shuffle=True,
+        )
         print(x_train.shape)
         self.model.fit(x_train, y_train)
-        print("MAE:",metrics.mean_absolute_error(y_val, self.model.predict(x_val)))
+        print("MAE:", metrics.mean_absolute_error(y_val, self.model.predict(x_val)))
         print(self.model.feature_importances_)
-    
-
 
     def get_probabilities(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
