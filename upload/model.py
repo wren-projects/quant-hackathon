@@ -825,7 +825,7 @@ class Ai:
     def train_reg(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
         """Return trained model."""
         if not self.initialized:
-            self.model = xgb.XGBRegressor(objective="reg:squarederror")
+            self.model = xgb.XGBRegressor(objective="reg:squarederror", max_depth = 10)
             self.initialized = True
             print(training_dataframe.columns)
 
