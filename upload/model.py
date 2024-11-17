@@ -589,6 +589,105 @@ class EloByLocation(RankingModel):
         self.teams_away.clear()
 
 
+class PageRank(RankingModel):
+    """Class for the page rank model."""
+
+    def __init__(
+        self, alpha: float = 0.85, tol: float = 1e-6, max_iter: int = 100
+    ) -> None:
+        """
+        Initialize the BasketballPageRank class.
+
+        Args:
+        - alpha: Damping factor for PageRank.
+        - tol: Convergence tolerance.
+        - max_iter: Maximum number of iterations.
+
+        """
+        self.alpha: float = alpha
+        self.tol: float = tol
+        self.max_iter: int = max_iter
+        self.teams: dict = {}
+        self.games: list = []
+
+    def add_match(self, match: Match) -> None:
+        """
+        Add a match to the dataset.
+
+        Args:
+        - match: line with data
+
+        """
+        if match.HID not in self.teams:
+            self.teams[match.HID] = len(self.teams)
+        if match.AID not in self.teams:
+            self.teams[match.AID] = len(self.teams)
+
+        if match.H:
+            self.games.append((match.AID, match.HID))
+        elif match.A:
+            self.games.append((match.HID, match.AID))
+
+    def calculate_ratings(self) -> dict:
+        """
+        Calculate the PageRank ratings for all teams.
+
+        Returns:
+        - ranks: Dictionary mapping team IDs to their PageRank scores.
+        Here is where the magic happen.
+
+        """
+        n = len(self.teams)
+        if n == 0:
+            return {}
+
+        # team_index = {team: idx for team, idx in self.teams.items()}
+        team_index = dict(self.teams.items())
+
+        # Build adjacency matrix
+        m = np.zeros((n, n))
+        for loser, winner in self.games:
+            m[team_index[winner], team_index[loser]] += 1
+
+        # Normalize the matrix
+        for i in range(n):
+            if m[i].sum() > 0:
+                m[i] /= m[i].sum()
+            else:
+                m[i] = 1 / n  # Handle dangling nodes
+
+        # PageRank algorithm
+        rank = np.ones(n) / n
+        for _ in range(self.max_iter):
+            new_rank = self.alpha * m.T @ rank + (1 - self.alpha) / n
+            if np.linalg.norm(new_rank - rank, ord=1) < self.tol:
+                break
+            rank = new_rank
+
+        # Map scores to teams
+        return {team: rank[team_index[team]] for team in self.teams}
+
+    def get_team_rating(self, team_id1: int, team_id2: int) -> np.ndarray:
+        """
+        Get the rating of one or two teams.
+
+        Args:
+        - team_id1: ID of the first team.
+        - team_id2: ID of the second team.
+
+        Returns:
+        - vecstor of ratings
+
+        """
+        ratings = self.calculate_ratings()
+        return np.array([ratings.get(team_id1, None), ratings.get(team_id2, None)])
+
+    def reset(self) -> None:
+        """Reset all data (forget all teams and matches)."""
+        self.teams = {}
+        self.games = []
+
+
 class Model:
     """Main class."""
 
