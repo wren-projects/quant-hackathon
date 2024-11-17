@@ -592,21 +592,20 @@ class EloByLocation(RankingModel):
 class PageRank(RankingModel):
     """Class for the page rank model."""
 
-    def __init__(
-        self, alpha: float = 0.85, tol: float = 1e-6, max_iter: int = 100
-    ) -> None:
+    ALPHA = 0.85
+    TOL = 1e-6
+    MAX_ITER = 100
+
+    def __init__(self) -> None:
         """
         Initialize the BasketballPageRank class.
 
         Args:
-        - alpha: Damping factor for PageRank.
-        - tol: Convergence tolerance.
-        - max_iter: Maximum number of iterations.
+            alpha: Damping factor for PageRank.
+            tol: Convergence tolerance.
+            max_iter: Maximum number of iterations.
 
         """
-        self.alpha: float = alpha
-        self.tol: float = tol
-        self.max_iter: int = max_iter
         self.teams: dict = {}
         self.games: list = []
 
@@ -615,68 +614,66 @@ class PageRank(RankingModel):
         Add a match to the dataset.
 
         Args:
-        - match: line with data
+             match: line with data
 
         """
-        if match.HID not in self.teams:
-            self.teams[match.HID] = len(self.teams)
-        if match.AID not in self.teams:
-            self.teams[match.AID] = len(self.teams)
+        self.teams.setdefault(match.HID, len(self.teams))
+        self.teams.setdefault(match.AID, len(self.teams))
 
-        if match.H:
-            self.games.append((match.AID, match.HID))
-        elif match.A:
-            self.games.append((match.HID, match.AID))
+        match_edge = (match.HID, match.AID) if match.H else (match.AID, match.HID)
+        self.games.append(match_edge)
 
     def calculate_ratings(self) -> dict:
         """
         Calculate the PageRank ratings for all teams.
 
-        Returns:
-        - ranks: Dictionary mapping team IDs to their PageRank scores.
         Here is where the magic happen.
 
+        Returns:
+            ranks: Dictionary mapping team IDs to their PageRank scores.
+
         """
-        n = len(self.teams)
-        if n == 0:
+        if not self.teams:
             return {}
 
-        # team_index = {team: idx for team, idx in self.teams.items()}
-        team_index = dict(self.teams.items())
+        number_of_teams = len(self.teams)
 
         # Build adjacency matrix
-        m = np.zeros((n, n))
+        adjacency_matrix = np.zeros((number_of_teams, number_of_teams))
         for loser, winner in self.games:
-            m[team_index[winner], team_index[loser]] += 1
+            adjacency_matrix[self.teams[winner], self.teams[loser]] += 1
 
         # Normalize the matrix
-        for i in range(n):
-            if m[i].sum() > 0:
-                m[i] /= m[i].sum()
+        for i in range(adjacency_matrix.shape[0]):
+            if adjacency_matrix[i].sum() > 0:
+                adjacency_matrix[i] /= adjacency_matrix[i].sum()
             else:
-                m[i] = 1 / n  # Handle dangling nodes
+                adjacency_matrix[i] = 1 / number_of_teams  # Handle dangling nodes
 
         # PageRank algorithm
-        rank = np.ones(n) / n
-        for _ in range(self.max_iter):
-            new_rank = self.alpha * m.T @ rank + (1 - self.alpha) / n
-            if np.linalg.norm(new_rank - rank, ord=1) < self.tol:
+        rank = np.ones(number_of_teams) / number_of_teams
+        for _ in range(self.MAX_ITER):
+            new_rank = (
+                self.ALPHA * adjacency_matrix.T @ rank
+                + (1 - self.ALPHA) / number_of_teams
+            )
+            if np.linalg.norm(new_rank - rank, ord=1) < self.TOL:
                 break
             rank = new_rank
 
         # Map scores to teams
-        return {team: rank[team_index[team]] for team in self.teams}
+        return {team: rank[self.teams[team]] for team in self.teams}
 
     def team_rating(self, team_id1: int, team_id2: int) -> tuple:
         """
         Get the rating of one or two teams.
 
         Args:
-        - team_id1: ID of the first team.
-        - team_id2: ID of the second team.
+            team_id1: ID of the first team.
+            team_id2: ID of the second team.
 
         Returns:
-        - vecstor of ratings
+            vector of ratings
 
         """
         ratings = self.calculate_ratings()
@@ -687,20 +684,17 @@ class PageRank(RankingModel):
         Get the ratio of winning two teams.
 
         Args:
-        - team_id1: ID of the first team.
-        - team_id2: ID of the second team.
+            team_id1: ID of the first team.
+            team_id2: ID of the second team.
 
         Returns:
-        - ratio of winning(home 0, away 100)
+            ratio of winning(home 0, away 100)
 
         """
         ratings = self.calculate_ratings()
-        ratio: float = (
-            ratings.get(team_id1, None)
-            / (ratings.get(team_id1, None) + ratings.get(team_id2, None))
-            * 100
-        )
-        return ratio
+        rating1 = ratings.get(team_id1, None)
+        rating2 = ratings.get(team_id2, None)
+        return rating2 / (rating1 + rating2) * 100
 
     def reset(self) -> None:
         """Reset all data (forget all teams and matches)."""
