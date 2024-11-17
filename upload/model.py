@@ -667,7 +667,7 @@ class PageRank(RankingModel):
         # Map scores to teams
         return {team: rank[team_index[team]] for team in self.teams}
 
-    def get_team_rating(self, team_id1: int, team_id2: int) -> np.ndarray:
+    def team_rating(self, team_id1: int, team_id2: int) -> tuple:
         """
         Get the rating of one or two teams.
 
@@ -680,7 +680,27 @@ class PageRank(RankingModel):
 
         """
         ratings = self.calculate_ratings()
-        return np.array([ratings.get(team_id1, None), ratings.get(team_id2, None)])
+        return (ratings.get(team_id1, None), ratings.get(team_id2, None))
+
+    def team_rating_ratio(self, team_id1: int, team_id2: int) -> float:
+        """
+        Get the ratio of winning two teams.
+
+        Args:
+        - team_id1: ID of the first team.
+        - team_id2: ID of the second team.
+
+        Returns:
+        - ratio of winning(home 0, away 100)
+
+        """
+        ratings = self.calculate_ratings()
+        ratio: float = (
+            ratings.get(team_id1, None)
+            / (ratings.get(team_id1, None) + ratings.get(team_id2, None))
+            * 100
+        )
+        return ratio
 
     def reset(self) -> None:
         """Reset all data (forget all teams and matches)."""
