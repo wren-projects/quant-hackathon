@@ -634,6 +634,12 @@ class Model:
             )
             self.train_ai_reg(cast(pd.DataFrame, games_increment[-train_size:]))
         elif games_increment.shape[0] > 0:
+            increment_season = int(games_increment.iloc[0]["Season"])
+            if self.season_number != increment_season:
+                self.elo.reset()
+                self.elo_by_location.reset()
+                self.season_number = increment_season
+
             self.old_matches = pd.concat(
                 [
                     self.old_matches.iloc[-self.TRAIN_SIZE :],
