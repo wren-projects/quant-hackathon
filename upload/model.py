@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from scipy.optimize import minimize
+from sklearn import model_selection, metrics
 
 if TYPE_CHECKING:
     import os
@@ -152,7 +153,7 @@ class TeamData:
     """Hold data of one team, both as home and away."""
 
     N_SHORT = 5
-    N_LONG = 20
+    N_LONG = 30
 
     BASE_COLUMNS: tuple[str, ...] = (
         "WR",
@@ -694,8 +695,6 @@ class Model:
         "HomeElo",
         "AwayElo",
         "EloByLocation",
-        "OddsH",
-        "OddsA",
     )
     MATCH_PARAMETERS = len(TeamData.COLUMNS) + len(RANKING_COLUMNS)
     TRAINING_DATA_COLUMNS: tuple[str, ...] = (*RANKING_COLUMNS, *TeamData.MATCH_COLUMNS)
@@ -721,8 +720,6 @@ class Model:
                 home_elo,
                 away_elo,
                 elo_by_location_prediction,
-                match.OddsH,
-                match.OddsA,
             ],
             index=self.RANKING_COLUMNS,
         )
@@ -830,12 +827,19 @@ class Ai:
         if not self.initialized:
             self.model = xgb.XGBRegressor(objective="reg:squarederror")
             self.initialized = True
+            print(training_dataframe.columns)
 
-        self.model.fit(training_dataframe, outcomes)
+        x_train, x_val, y_train, y_val = model_selection.train_test_split(training_dataframe.to_numpy(), outcomes.to_numpy(), test_size=0.01, random_state=2, shuffle=True)
+        print(x_train.shape)
+        self.model.fit(x_train, y_train)
+        print("MAE:",metrics.mean_absolute_error(y_val, self.model.predict(x_val)))
+        print(self.model.feature_importances_)
+    
+
 
     def get_probabilities(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
-        return self.model.predict_proba(dataframe)
+        return self.model.predict_proba(dataframe.to_numpy())
 
     def get_probabilities_reg(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
