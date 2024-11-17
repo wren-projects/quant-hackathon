@@ -1,7 +1,7 @@
 import sys
 import math
 import matplotlib.pyplot as plt
-from openskill.models import PlackettLuce, BradleyTerryFull, BradleyTerryPart
+from openskill.models import BradleyTerryPart
 import pandas as pd
 import numpy as np
 
@@ -27,14 +27,14 @@ def openSkillAnalyze(season: pd.DataFrame):
 
     predictionDif = np.array([np.zeros(2) for i in range(100)])
     predictionCount = np.array([np.zeros(1) for i in range(100)])
-    model = BradleyTerryFull()
+    model = BradleyTerryPart()
 
     x = season.groupby("AID").groups.keys()
     rating = {i: model.rating(name=i) for i in x}
-    rating.update(openSkillRating)
+    # rating.update(openSkillRating)
 
-    for i in rating:
-        rating[i].sigma = model.sigma
+    # for i in rating:
+    #    rating[i].sigma = model.sigma
     # count number of matches in this season
     i = 0
     for _, match in season.iterrows():
@@ -72,7 +72,7 @@ def openSkillAnalyze(season: pd.DataFrame):
             bets[1][aScore] += 1
 
     openSkillRating.update(rating)
-    return predictionCount
+    # return predictionCount
     return predictionDif
 
 
@@ -207,7 +207,7 @@ def assignOpen(season: pd.DataFrame):
 
     predictionDif = np.array([np.zeros(2) for i in range(100)])
     predictionCount = np.array([np.zeros(1) for i in range(100)])
-    model = ThurstoneMostellerFull()
+    model = BradleyTerryPart()
 
     x = season.groupby("AID").groups.keys()
     rating = {i: model.rating(name=i) for i in x}
@@ -355,8 +355,8 @@ def try_bets() -> None:
         home["B"] = withRating.apply(
             lambda line, i=i: 1 if line["RATING"] * line["OddsH"] > i else 0, axis=1
         )
-        home["Win"] = home["B"] * withElo["H"]
-        home["Profit"] = home["B"] * withElo["H"] * withElo["OddsH"]
+        home["Win"] = home["B"] * withRating["H"]
+        home["Profit"] = home["B"] * withRating["H"] * withRating["OddsH"]
         profit.append(home["Profit"].sum() - home["B"].sum())
         success.append(home["Win"].sum() / home["B"].sum())
     print(max(profit))
@@ -412,8 +412,8 @@ def anaylzeGlico() -> None:
 
 def analyzeOpenSKill() -> None:
     eloDif = runSeason(openSkillAnalyze)
-    plt.plot(range(100), eloDif)
-    plt.show()
+    # plt.plot(range(100), eloDif)
+    # plt.show()
     a = eloDif[:, 0]
     b = eloDif[:, 1]
     winrate = a / b
@@ -430,7 +430,8 @@ def analyzeOpenSKill() -> None:
     # print(dict(zip(expected, actual)))
 
 
-analyzeOpenSKill()
+# analyzeOpenSKill()
 # plt.plot(range(100), range(100))
 # print(bets)
-# try_bets()
+try_bets()
+runSeason(assignOpen).to_csv("data/withRating.csv")
