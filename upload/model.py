@@ -593,7 +593,7 @@ class Model:
     """Main class."""
 
     TRAIN_SIZE: int = 2000
-    FIRST_TRAIN_MOD: int = 1
+    FIRST_TRAIN_MOD: int = 4
 
     def __init__(self) -> None:
         """Init classes."""
