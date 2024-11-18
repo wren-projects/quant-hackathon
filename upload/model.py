@@ -837,8 +837,8 @@ class Ai:
             {
                 "tree_method": "approx",
                 "max_depth": 5,
-                "random_state": 2,
-                "seed": 2,
+                "random_state": 1001,
+                "seed": 1001,
                 "eval_metric": "mape",
             },
             Xy,
