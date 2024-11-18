@@ -823,7 +823,6 @@ class Ai:
 
     def train_reg(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
         """Return trained model."""
-        n_rounds = 32
         x, x_val, y, y_val = model_selection.train_test_split(
             training_dataframe.to_numpy(),
             outcomes.to_numpy(),
@@ -835,14 +834,21 @@ class Ai:
         evals_result = {}
         # if not self.initialized:
         self.model = xgb.train(
-            {"tree_method": "approx", "max_depth": 10},
+            {
+                "tree_method": "approx",
+                "max_depth": 5,
+                "random_state": 2,
+                "seed": 0,
+                "eval_metric": "mape",
+            },
             Xy,
-            num_boost_round=n_rounds,
+            num_boost_round=64,
             evals=[(Xy, "Train")],
             evals_result=evals_result,
+            verbose_eval=False,
         )
-        shap = self.model.predict(Xy, pred_contribs=True)
-        print("Train inicial")
+        # shap = self.model.predict(Xy, pred_contribs=True)
+        # print("Train inicial")
         self.initialized = True
         """
         refreshed = xgb.train(
