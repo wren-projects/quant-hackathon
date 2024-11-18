@@ -730,6 +730,7 @@ class Model:
         self.seen_matches = set()
         self.elo = Elo()
         self.elo_by_location = EloByLocation()
+        self.page_rank = PageRank()
         self.player = Player()
         self.ai = Ai()
         self.trained = False
@@ -746,6 +747,7 @@ class Model:
             self.elo.add_match(match)
             self.elo_by_location.add_match(match)
             self.data.add_match(match)
+            self.page_rank.add_match(match)
 
     def place_bets(
         self,
@@ -769,6 +771,7 @@ class Model:
             if self.season_number != increment_season:
                 self.elo.reset()
                 self.elo_by_location.reset()
+                self.page_rank.reset()
                 self.season_number = increment_season
 
             self.old_matches = pd.concat(
@@ -825,6 +828,7 @@ class Model:
         "HomeElo",
         "AwayElo",
         "EloByLocation",
+        "PageRank",
     )
     MATCH_PARAMETERS = len(TeamData.COLUMNS) + len(RANKING_COLUMNS)
     TRAINING_DATA_COLUMNS: tuple[str, ...] = (*RANKING_COLUMNS, *TeamData.MATCH_COLUMNS)
@@ -844,12 +848,14 @@ class Model:
         home_elo = self.elo.team_rating(match.HID)
         away_elo = self.elo.team_rating(match.AID)
         elo_by_location_prediction = self.elo_by_location.predict(match)
+        page_rank_prediction = self.page_rank.team_rating_ratio(match.HID, match.AID)
 
         rankings = pd.Series(
             [
                 home_elo,
                 away_elo,
                 elo_by_location_prediction,
+                page_rank_prediction,
             ],
             index=self.RANKING_COLUMNS,
         )
@@ -872,6 +878,7 @@ class Model:
             self.data.add_match(match)
             self.elo.add_match(match)
             self.elo_by_location.add_match(match)
+            self.page_rank.add_match(match)
 
         training_dataframe = pd.DataFrame(
             training_data, columns=pd.Index(self.TRAINING_DATA_COLUMNS)
@@ -899,6 +906,7 @@ class Model:
             self.data.add_match(match)
             self.elo.add_match(match)
             self.elo_by_location.add_match(match)
+            self.page_rank.add_match(match)
 
         training_dataframe = pd.DataFrame(
             training_data, columns=pd.Index(self.TRAINING_DATA_COLUMNS)
