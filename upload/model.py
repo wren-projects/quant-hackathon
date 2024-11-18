@@ -453,7 +453,7 @@ class TeamElo:
     """
 
     A: int = 400
-    K: int = 40
+    K: int = 100
     BASE: int = 160
     opponents: int
     games: int
@@ -629,13 +629,13 @@ class Model:
 
         if not self.trained:
             train_size = self.TRAIN_SIZE * self.FIRST_TRAIN_MOD
-            print(
+            """print(
                 f"Initial training on {games_increment[-train_size :].shape[0]}"
                 f" matches with bankroll {summary.Bankroll}"
-            )
+            )"""
             self.train_ai_reg(cast(pd.DataFrame, games_increment[-train_size:]))
         elif games_increment.shape[0] > 0:
-            increment_season = int(games_increment.iloc[0]["Season"])
+            # increment_season = int(games_increment.iloc[0]["Season"])
             # if self.season_number != increment_season:
             #    self.elo.reset()
             #    self.elo_by_location.reset()
@@ -660,10 +660,10 @@ class Model:
 
             month = pd.to_datetime(summary.Date).month
             if self.last_retrain != month:
-                print(
+                """print(
                     f"{summary.Date}: retraining on {self.old_matches.shape[0]}"
                     f" matches with bankroll {summary.Bankroll}"
-                )
+                )"""
                 self.ai.train_reg(self.old_matches, self.old_outcomes)
                 self.last_retrain = month
                 self.budget = summary.Bankroll
@@ -861,7 +861,7 @@ class Ai:
         )
         self.model = refreshed"""
         x_val = xgb.DMatrix(x_val)
-        print("MAE:", metrics.mean_absolute_error(y_val, self.model.predict(x_val)))
+        """print("MAE:", metrics.mean_absolute_error(y_val, self.model.predict(x_val)))"""
         # print(shap)
 
     def get_probabilities(self, dataframe: pd.DataFrame) -> pd.DataFrame:
