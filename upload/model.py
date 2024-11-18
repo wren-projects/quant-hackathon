@@ -592,8 +592,8 @@ class EloByLocation(RankingModel):
 class Model:
     """Main class."""
 
-    TRAIN_SIZE: int = 2000
-    FIRST_TRAIN_MOD: int = 4
+    TRAIN_SIZE: int = 4000
+    FIRST_TRAIN_MOD: int = 1
 
     def __init__(self) -> None:
         """Init classes."""
@@ -636,10 +636,10 @@ class Model:
             self.train_ai_reg(cast(pd.DataFrame, games_increment[-train_size:]))
         elif games_increment.shape[0] > 0:
             increment_season = int(games_increment.iloc[0]["Season"])
-            if self.season_number != increment_season:
-                self.elo.reset()
-                self.elo_by_location.reset()
-                self.season_number = increment_season
+            # if self.season_number != increment_season:
+            #    self.elo.reset()
+            #    self.elo_by_location.reset()
+            #    self.season_number = increment_season
 
             self.old_matches = pd.concat(
                 [
@@ -824,10 +824,12 @@ class Ai:
 
     def train_reg(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
         """Return trained model."""
-        if not self.initialized:
-            self.model = xgb.XGBRegressor(objective="reg:squarederror", max_depth=10)
-            self.initialized = True
-            print(training_dataframe.columns)
+
+        self.model = xgb.XGBRegressor(
+            objective="reg:squarederror", max_depth=10, n_estimators=1000
+        )
+        self.initialized = True
+        print(training_dataframe.columns)
 
         x_train, x_val, y_train, y_val = model_selection.train_test_split(
             training_dataframe.to_numpy(),
