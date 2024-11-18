@@ -589,6 +589,9 @@ class EloByLocation(RankingModel):
         self.teams_away.clear()
 
 
+PageRankEdge = tuple[TeamID, TeamID]
+
+
 class PageRank(RankingModel):
     """Class for the page rank model."""
 
@@ -606,8 +609,9 @@ class PageRank(RankingModel):
             max_iter: Maximum number of iterations.
 
         """
-        self.teams: dict = {}
-        self.games: list = []
+        self.teams: dict[TeamID, int] = {}
+        self.games: list[PageRankEdge] = []
+        self.__chached_ranks: dict[TeamID, float] | None = {}
 
     def add_match(self, match: Match) -> None:
         """
@@ -622,8 +626,9 @@ class PageRank(RankingModel):
 
         match_edge = (match.HID, match.AID) if match.H else (match.AID, match.HID)
         self.games.append(match_edge)
+        self.__chached_ranks = None
 
-    def calculate_ratings(self) -> dict:
+    def ratings(self) -> dict[TeamID, float]:
         """
         Calculate the PageRank ratings for all teams.
 
@@ -635,6 +640,9 @@ class PageRank(RankingModel):
         """
         if not self.teams:
             return {}
+
+        if self.__chached_ranks:
+            return self.__chached_ranks
 
         number_of_teams = len(self.teams)
 
@@ -662,9 +670,13 @@ class PageRank(RankingModel):
             rank = new_rank
 
         # Map scores to teams
-        return {team: rank[self.teams[team]] for team in self.teams}
+        ratings = {team: rank[self.teams[team]] for team in self.teams}
+        self.__chached_ranks = ratings
+        return ratings
 
-    def team_rating(self, team_id1: int, team_id2: int) -> tuple:
+    def team_rating(
+        self, team_id1: TeamID, team_id2: TeamID
+    ) -> tuple[float | None, float | None]:
         """
         Get the rating of one or two teams.
 
@@ -676,10 +688,10 @@ class PageRank(RankingModel):
             vector of ratings
 
         """
-        ratings = self.calculate_ratings()
+        ratings = self.ratings()
         return (ratings.get(team_id1, None), ratings.get(team_id2, None))
 
-    def team_rating_ratio(self, team_id1: int, team_id2: int) -> float:
+    def team_rating_ratio(self, team_id1: TeamID, team_id2: TeamID) -> float | None:
         """
         Get the ratio of winning two teams.
 
@@ -691,10 +703,15 @@ class PageRank(RankingModel):
             ratio of winning(home 0, away 100)
 
         """
-        ratings = self.calculate_ratings()
+        ratings = self.ratings()
+
         rating1 = ratings.get(team_id1, None)
         rating2 = ratings.get(team_id2, None)
-        return rating2 / (rating1 + rating2) * 100
+
+        if rating1 is None or rating2 is None:
+            return None
+
+        return 100 * rating2 / (rating1 + rating2)
 
     def reset(self) -> None:
         """Reset all data (forget all teams and matches)."""
