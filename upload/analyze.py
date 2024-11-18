@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import functools
 import sys
-import math
+from typing import TYPE_CHECKING, Callable
+
 import matplotlib.pyplot as plt
-from openskill.models import BradleyTerryFull, BradleyTerryPart, PlackettLuce
-import pandas as pd
 import numpy as np
+import pandas as pd
+from copiedopenskill import PlackettLuce
+from openskill.models import BradleyTerryFull, BradleyTerryPart, ThurstoneMostellerFull
+
+pd.options.mode.chained_assignment = None
 
 sys.path.append(".")
 
@@ -134,7 +139,7 @@ class PageRank:
 
 def pagerank_model(season: pd.DataFrame) -> list[float]:
     """Predicts the season using pageran."""
-    model = PlackettLuce()
+    model = PageRank()
 
     results = []
     # count number of matches in this season
@@ -151,12 +156,15 @@ def pagerank_model(season: pd.DataFrame) -> list[float]:
     return results
 
 
-def openskill_model(season: pd.DataFrame) -> list[float]:
+def openskill_model(
+    season: pd.DataFrame,
+    modelType: Type[BradleyTerryFull | BradleyTerryPart | PlackettLuce],
+) -> list[float]:
     """Predicts the season using openskill."""
-    model = PlackettLuce()
+    model = modelType()
 
     x = season.groupby("AID").groups.keys()
-    rating_database = {i: model.rating(name=i) for i in x}
+    rating_database = {i: [model.mu, model.sigma] for i in x}
 
     results = []
     # count number of matches in this season
@@ -165,8 +173,15 @@ def openskill_model(season: pd.DataFrame) -> list[float]:
         away_id = match["AID"]
         home_score = match["H"]
 
-        elo_home = [rating_database[home_id]]
-        elo_away = [rating_database[away_id]]
+        elo_home = [
+            model.rating(
+                rating_database[home_id][0],
+                rating_database[home_id][1],
+            )
+        ]
+        elo_away = [
+            model.rating(rating_database[away_id][0], rating_database[away_id][1])
+        ]
 
         expected = model.predict_win([elo_home, elo_away])[0]
         # adjusts elo
@@ -175,8 +190,8 @@ def openskill_model(season: pd.DataFrame) -> list[float]:
         else:
             [[new_elo_away], [new_elo_home]] = model.rate([elo_away, elo_home])
 
-        rating_database[home_id] = new_elo_home
-        rating_database[away_id] = new_elo_away
+        rating_database[home_id] = [new_elo_home.mu, new_elo_home.sigma]
+        rating_database[away_id] = [new_elo_away.mu, new_elo_away.sigma]
 
         results.append(expected)
 
@@ -197,7 +212,6 @@ def elo_model(season: pd.DataFrame) -> list[float]:
     x = season.groupby("AID").groups.keys()
     home_rating_database = {i: 1000 for i in x}
     away_rating_database = {i: 1000 for i in x}
-    print(len(home_rating_database.keys()))
 
     results = []
     # count number of matches in this season
@@ -221,78 +235,6 @@ def elo_model(season: pd.DataFrame) -> list[float]:
     return results
 
 
-"""def glicoModel(season: pd.DataFrame):
-    C = 35
-    q = math.log(10) / 1000
-    # tracks accuracy
-    # on i-th position is a tuple:
-    # 0) how many times did home win when his predicted winrate was i%
-    # 1) how many times was home's predicted winrate i%
-
-    def get_g(RD):
-        return 1 / math.sqrt(1 + 3 * q**2 * RD**2 / math.pi**2)
-
-    # calculates odds
-    def helper(ratH, ratA):
-        return 1 / (1 + 10 ** (get_g(ratA[1]) * (ratH[0] - ratA[1]) / (-400)))
-
-    def adjustRating(
-        ratH: tuple[int, int],
-        ratA: tuple[int, int],
-        daysSinceLastGame: int,
-        result: bool,
-    ):
-        RD = min(math.sqrt(ratH[1] ** 2 + C**2 * daysSinceLastGame), 350)
-        d_squared = 1 / (
-            q**2 * get_g(ratA[1]) ** 2 * helper(ratH, ratA) * (1 - helper(ratH, ratA))
-        )
-        newR = ratH[0] + q / (1 / RD**2 + 1 / d_squared) * get_g(ratA[1]) * (
-            result - helper(ratH, ratA)
-        )
-        newRD = 1 / math.sqrt(1 / RD**2 + 1 / d_squared)
-        return [newR, newRD]
-
-    # setups everyone's elo to 1000
-    x = season.groupby("AID").groups.keys()
-    homeGlico = {i: [1500, 350] for i in x}
-    awayGlico = {i: [1500, 350] for i in x}
-    lastGameHome = {i: pd.Timestamp(0) for i in x}
-    lastGameAway = {i: pd.Timestamp(0) for i in x}
-    # count number of matches in this season
-    i = 0
-    for _, match in season.iterrows():
-        i += 1
-        hId = match["HID"]
-        aId = match["AID"]
-        hScore = match["H"]
-        aScore = match["A"]
-        date = match["Date"]
-        eloH = homeGlico[hId]
-        eloA = awayGlico[aId]
-
-        # calculates the odds of home to win
-        expected = helper(eloH, eloA)
-
-        # adjusts elo
-        homeGlico[hId] = adjustRating(
-            eloH, eloA, (date - lastGameHome[hId]).days, hScore > aScore
-        )
-        awayGlico[aId] = adjustRating(
-            eloA, eloH, (date - lastGameAway[aId]).days, hScore < aScore
-        )
-        lastGameHome[hId] = date
-        lastGameAway[hId] = date
-
-        # if elo had enough time to stabilize, adjust expected dif
-        if i > 200:
-            realWinner = hScore > aScore
-            eloDif[int(expected * 100)][0] += realWinner
-            eloDif[int(expected * 100)][1] += 1
-
-    return eloDif
-"""
-
-
 # load everything
 
 games = pd.read_csv("./data/games.csv", index_col=0)
@@ -303,111 +245,231 @@ players = pd.read_csv("./data/players.csv", index_col=0)
 players["Date"] = pd.to_datetime(players["Date"])
 
 
-def add_predictions_to_season(function: callable) -> any:
+@functools.cache
+def add_predictions_to_season(
+    function: Callable[[pd.DataFrame], list[float]],
+    matches_to_discard_each_season: int = 64,
+) -> pd.DataFrame:
+    """Add models prediction as a new column into games (called "PRED")."""
+    games["EARLY"] = 0
+
     x = []
-    for i, season in games.groupby("Season"):
+    for _, season in games.groupby("Season"):
+        season["PRED"] = function(season)
+        games.loc[season.index[:matches_to_discard_each_season], "EARLY"] = 1
         x += function(season)
     games["PRED"] = x
-    return games
+    return games[games["EARLY"] == 0]
 
 
-def analyze_with_elo() -> None:
-    matrix = [[0, 0], [0, 0], [0, 0]]
-    predicted = pd.DataFrame()
-    predicted["P"] = withElo["Elo"].map(
-        lambda a: 0 if a < 0.3 else (1 if a < 0.7 else 2)
+def try_bets(
+    model: Callable[[pd.DataFrame], list[float]],
+    bettings_strategy_home: tuple[float, float] = [0, 2],
+    bettings_strategy_away: tuple[float, float] = [0, 2],
+    discard_per_season: int = 64,
+    print_output: bool = True,
+) -> tuple[float, float]:
+    """
+    Simulate betting.
+
+    Bettings strategy format is (offset, treshold). Where offset is the
+    value that is subtracted from predicted winrate and treshold is EV
+    treshold above which a bet is made.
+    """
+    games_with_predictions = add_predictions_to_season(
+        model, matches_to_discard_each_season=discard_per_season
     )
-    predicted["R"] = withElo["H"]
-    for i, p in predicted.iterrows():
-        matrix[p["P"]][p["R"]] += 1
+
+    games_with_predictions["BH"] = games_with_predictions.apply(
+        lambda row: (row["PRED"] - bettings_strategy_home[0]) * row["OddsH"]
+        > bettings_strategy_home[1],
+        axis=1,
+    )
+    games_with_predictions["BA"] = games_with_predictions.apply(
+        lambda row: (1 - row["PRED"] - bettings_strategy_away[0]) * row["OddsA"]
+        > bettings_strategy_away[1],
+        axis=1,
+    )
+
+    print_output and print(
+        "bets Home/Away",
+        games_with_predictions["BH"].sum(),
+        games_with_predictions["BA"].sum(),
+    )
+
+    profit_home = (
+        games_with_predictions["BH"]
+        * games_with_predictions["H"]
+        * games_with_predictions["OddsH"]
+        - games_with_predictions["BH"]
+    ).sum()
+
+    profit_away = (
+        games_with_predictions["BA"]
+        * games_with_predictions["A"]
+        * games_with_predictions["OddsA"]
+        - games_with_predictions["BA"]
+    ).sum()
+
+    print_output and print("Profit Home/Away", profit_home, profit_away)
+
+    bets_home = games_with_predictions["BH"].sum() * 100
+    winrate_home = (
+        (games_with_predictions["BH"] * games_with_predictions["H"]).sum() / bets_home
+        if bets_home != 0
+        else 0
+    )
+
+    bets_away = games_with_predictions["BA"].sum() * 100
+    winrate_away = (
+        (games_with_predictions["BA"] * games_with_predictions["A"]).sum() / bets_away
+        if bets_away != 0
+        else 0
+    )
+    print_output and print("Winrate Home/Away", winrate_home, winrate_away)
+    return profit_home, profit_away
 
 
-def try_bets() -> None:
-    # Home
-    home = pd.DataFrame()
-    profit = []
-    success = []
-    for i in range(100, 300, 2):
-        print(i)
-        i = i / 100  # noqa: PLW2901
-        home["B"] = withRating.apply(
-            lambda line, i=i: 1 if line["RATING"] * line["OddsH"] > i else 0, axis=1
-        )
-        home["Win"] = home["B"] * withRating["H"]
-        home["Profit"] = home["B"] * withRating["H"] * withRating["OddsH"]
-        profit.append(home["Profit"].sum() - home["B"].sum())
-        success.append(home["Win"].sum() / home["B"].sum())
-    print(max(profit))
-    plt.plot(range(100, 300, 2), profit)
-    plt.plot(range(100, 300, 2), success)
-    plt.legend(["Profit", "success"])
-    plt.show()
-    """
-    #Away
-    away = pd.DataFrame()
-
-    away["B"] = withElo.apply(lambda line: 1 if 1/line["OddsA"] < 0.75 and (1-line["Elo"]) * line["OddsA"] > 3 else 0,axis=1)
-    away["Win"] = away["B"] * withElo["A"]
-    away["Profit"] = away["B"] * withElo["A"] * withElo["OddsA"]
-
-    print("bet", away["B"].sum())
-    print("won", away["Win"].sum())
-    print("won", away["Profit"].sum())
-    """
-
-
-def analyzeBets() -> None:
-    x = pd.DataFrame()
-    x["Elo"] = withRating["RATING"]
-    x["H"] = withRating["H"]
-    x["N"] = withRating["N"]
-    x["POFF"] = withRating["POFF"]
-    x["OddsH"] = withRating["OddsH"]
-    x["OddsA"] = withRating["OddsA"]
-    x["RequiredH"] = 1 / x["OddsH"]
-    x["RequiredA"] = 1 / x["OddsA"]
-    print(x.nsmallest(50, "RequiredH"))
-    print(x.nsmallest(50, "RequiredA"))
-
-
-def analyze_rating(model) -> None:
-    data = add_predictions_to_season(model)
+def analyze_rating(
+    model: Callable[[pd.DataFrame], list[float]],
+    discard_per_season: int = 64,
+    axis: None | any = None,
+) -> None:
+    """Analyzes model's rating capabilities."""
+    data = add_predictions_to_season(
+        model, matches_to_discard_each_season=discard_per_season
+    )
+    data = data[data["EARLY"] == 0]
     predictions_accuracy = np.array([np.zeros(2)] * 100)
     prediction_count = np.array([np.zeros(1)] * 100)
-    lastSeason = None
-    count = 0
     for _, match in data.iterrows():
-        count += 1
-        if match["Season"] != lastSeason:
-            lastSeason = match["Season"]
-            count = 0
-        if count < 64:
-            continue
         predictions_accuracy[min(99, int(match["PRED"] * 100))][0] += match["H"]
         predictions_accuracy[min(99, int(match["PRED"] * 100))][1] += 1
         prediction_count[min(99, int(match["PRED"] * 100))] += 1
 
-    figure, axis = plt.subplots(2, 1)
     winrate = predictions_accuracy[:, 0] / predictions_accuracy[:, 1]
 
     # filter out all NaNs
     mask = np.logical_not(np.isnan(winrate))
     actual = winrate[mask] * 100
     expected = np.arange(100)[mask]
+
     print(np.corrcoef(actual, expected))
     dif = actual - expected
     print(np.var(dif))
-    axis[0].plot(expected, actual)
-    axis[0].set_title("Accuracy of guesses")
     print(sum(dif) / len(dif))
-    axis[1].plot(range(100), prediction_count)
-    axis[1].set_title("Number of guesses")
-    plt.show()
+
+    if axis is None:
+        figure, my_axis = plt.subplots(2, 1)
+    else:
+        my_axis = axis
+
+    my_axis[0].plot(expected, expected)
+    my_axis[0].plot(expected, actual)
+    my_axis[0].set_title("Accuracy of guesses")
+    my_axis[1].plot(range(100), prediction_count)
+    my_axis[1].set_title("Number of guesses")
+    if axis is None:
+        plt.show()
+
+
+def adjust_model(
+    model: Callable[[pd.DataFrame], list[float]], a: float = 1, b: float = 0
+) -> Callable[[pd.DataFrame], list[float]]:
+    """
+    Adjust a model that outputs a line of the form y=ax+b into a line of the form y=x.
+
+    Still respects 0 as min and 1 as max values.
+    """
+
+    def helper(data: pd.DataFrame) -> list[float]:
+        output = np.array(model(data))
+        x = (output - b) / a + b
+        x[x >= 1] = 0.99
+        x[x <= 0] = 0.01
+        return list(x)
+
+    return helper
+
+
+def openskill_with_specific_model(
+    model: type[BradleyTerryFull | BradleyTerryPart | PlackettLuce],
+) -> Callable[[pd.DataFrame], list[float]]:
+    """Return openskill_model that uses the selected prediction model."""
+    return lambda season: openskill_model(season, model)
 
 
 # analyzeOpenSKill()
 # plt.plot(range(100), range(100))
 # print(bets)
 # analyze_rating(pageran_model)
+def main_analyze() -> None:
+    models = [
+        elo_model,
+        openskill_with_specific_model(PlackettLuce),
+        openskill_with_specific_model(BradleyTerryFull),
+        pagerank_model,
+    ]
+    name = [
+        "elo",
+        "ThurstoneMostellerFull",
+        "ThurstoneMostellerPart",
+        "BradleyTerryPart",
+        "BradleyTerryFull",
+        "PageRank",
+    ]
+    plots, axis = plt.subplots(len(models), 2)
+    for i, model in enumerate(models):
+        analyze_rating(
+            model=model,
+            axis=axis[i],
+            discard_per_season=128,
+        )
+        axis[i][0].set_title(axis[i][0].get_title() + name[i])
+    plt.show()
 
-analyze_rating(openskill_model)
+
+def main_bets() -> None:
+    models = [openskill_with_specific_model(PlackettLuce)]
+    for i, model in enumerate(models):
+        print(model)
+        max_away = -10000
+        for j in range(0, 20, 4):
+            for threshold in range(120, 250, 25):
+                discard = 140
+                threshold /= 100
+                home, away = try_bets(
+                    model=model,
+                    bettings_strategy_home=[100, 1],
+                    bettings_strategy_away=[j, threshold],
+                    discard_per_season=discard,
+                    print_output=False,
+                )
+                if max_away < away:
+                    treshold_away = threshold, j
+                    max_away = away
+
+        print("Tresholds", treshold_away)
+        print("Away", max_away)
+
+
+def currentBest():
+    a, _ = try_bets(
+        model=pagerank_model,
+        bettings_strategy_home=[0, 2],
+        bettings_strategy_away=[100, 1],
+        discard_per_season=90,
+    )
+
+    _, b = try_bets(
+        model=openskill_with_specific_model(PlackettLuce),
+        bettings_strategy_home=[100, 1],
+        bettings_strategy_away=[0, 2],
+        discard_per_season=90,
+    )
+    print("Current best is", a + b)
+
+
+currentBest()
+# main_elo()
+# main_analyze()
