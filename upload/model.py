@@ -808,11 +808,10 @@ def calculate_elo_accuracy(data: list[list[int]]) -> float:
 class Ai:
     """Class for training and predicting."""
 
-    model: xgb.XGBRegressor | xgb.XGBClassifier
-
     def __init__(self):
         """Create a new Model from a XGBClassifier."""
         self.initialized = False
+        self.model: xgb.XGBRegressor | xgb.XGBClassifier
 
     def train(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
         """Return trained model."""
@@ -824,24 +823,40 @@ class Ai:
 
     def train_reg(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
         """Return trained model."""
-
-        self.model = xgb.XGBRegressor(
-            objective="reg:squarederror", max_depth=10, n_estimators=1000
-        )
-        self.initialized = True
-        print(training_dataframe.columns)
-
-        x_train, x_val, y_train, y_val = model_selection.train_test_split(
+        n_rounds = 32
+        x, x_val, y, y_val = model_selection.train_test_split(
             training_dataframe.to_numpy(),
             outcomes.to_numpy(),
             test_size=0.01,
-            random_state=2,
             shuffle=True,
+            random_state=2,
         )
-        print(x_train.shape)
-        self.model.fit(x_train, y_train)
+        Xy = xgb.DMatrix(x, y)
+        evals_result = {}
+        # if not self.initialized:
+        self.model = xgb.train(
+            {"tree_method": "approx", "max_depth": 10},
+            Xy,
+            num_boost_round=n_rounds,
+            evals=[(Xy, "Train")],
+            evals_result=evals_result,
+        )
+        shap = self.model.predict(Xy, pred_contribs=True)
+        print("Train inicial")
+        self.initialized = True
+        """
+        refreshed = xgb.train(
+            {"process_type": "update", "updater": "refresh", "refresh_leaf": True},
+            Xy,
+            num_boost_round=n_rounds,
+            xgb_model=self.model,
+            evals=[(Xy, "Train")],
+            evals_result=evals_result,
+        )
+        self.model = refreshed"""
+        x_val = xgb.DMatrix(x_val)
         print("MAE:", metrics.mean_absolute_error(y_val, self.model.predict(x_val)))
-        print(self.model.feature_importances_)
+        # print(shap)
 
     def get_probabilities(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
@@ -849,7 +864,9 @@ class Ai:
 
     def get_probabilities_reg(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
-        predicted_score_differences = self.model.predict(dataframe)
+        predicted_score_differences = self.model.predict(
+            xgb.DMatrix(dataframe.to_numpy())
+        )
         return self.calculate_probabilities(predicted_score_differences)
 
     def save_model(self, path: os.PathLike) -> None:
