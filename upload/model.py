@@ -391,7 +391,7 @@ class Player:
         # Constraint: sum of all props <= 1
         # (global budget constraint for entire 2D array)
         cons = [
-            {"type": "ineq", "fun": lambda props: 1.0 - sum(props)}
+            {"type": "ineq", "fun": lambda props: 0.7 - sum(props)}
         ]  # Global budget constraint
 
         # Bounds: Each proportion must be between 0 and 1
