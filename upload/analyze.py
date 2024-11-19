@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Callable
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from copiedopenskill import PlackettLuce
+from copiedopenskill import OpenSkillAPI
 from openskill.models import BradleyTerryFull, BradleyTerryPart, ThurstoneMostellerFull
 
 pd.options.mode.chained_assignment = None
@@ -156,42 +156,17 @@ def pagerank_model(season: pd.DataFrame) -> list[float]:
     return results
 
 
-def openskill_model(
-    season: pd.DataFrame,
-    modelType: Type[BradleyTerryFull | BradleyTerryPart | PlackettLuce],
-) -> list[float]:
+def openskill_model(season: pd.DataFrame) -> list[float]:
     """Predicts the season using openskill."""
-    model = modelType()
+    model = OpenSkillAPI()
 
     x = season.groupby("AID").groups.keys()
-    rating_database = {i: [model.mu, model.sigma] for i in x}
 
     results = []
     # count number of matches in this season
     for _, match in season.iterrows():
-        home_id = match["HID"]
-        away_id = match["AID"]
-        home_score = match["H"]
-
-        elo_home = [
-            model.rating(
-                rating_database[home_id][0],
-                rating_database[home_id][1],
-            )
-        ]
-        elo_away = [
-            model.rating(rating_database[away_id][0], rating_database[away_id][1])
-        ]
-
-        expected = model.predict_win([elo_home, elo_away])[0]
-        # adjusts elo
-        if home_score:
-            [[new_elo_home], [new_elo_away]] = model.rate([elo_home, elo_away])
-        else:
-            [[new_elo_away], [new_elo_home]] = model.rate([elo_away, elo_home])
-
-        rating_database[home_id] = [new_elo_home.mu, new_elo_home.sigma]
-        rating_database[away_id] = [new_elo_away.mu, new_elo_away.sigma]
+        expected = model.predict(match)
+        model.add_match(match)
 
         results.append(expected)
 
@@ -268,12 +243,12 @@ def try_bets(
     bettings_strategy_away: tuple[float, float] = [0, 2],
     discard_per_season: int = 64,
     print_output: bool = True,
-) -> tuple[float, float]:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Simulate betting.
 
-    Bettings strategy format is (offset, treshold). Where offset is the
-    value that is subtracted from predicted winrate and treshold is EV
+    Bettings strategy format is (min_certainty, treshold). Where min_certainty is the
+    minimal predicted winrate and treshold is EV
     treshold above which a bet is made.
     """
     games_with_predictions = add_predictions_to_season(
@@ -281,53 +256,32 @@ def try_bets(
     )
 
     games_with_predictions["BH"] = games_with_predictions.apply(
-        lambda row: (row["PRED"] - bettings_strategy_home[0]) * row["OddsH"]
-        > bettings_strategy_home[1],
+        lambda row: row["PRED"] >= bettings_strategy_home[0]
+        and (row["PRED"] * row["OddsH"]) > bettings_strategy_home[1],
         axis=1,
     )
     games_with_predictions["BA"] = games_with_predictions.apply(
-        lambda row: (1 - row["PRED"] - bettings_strategy_away[0]) * row["OddsA"]
-        > bettings_strategy_away[1],
+        lambda row: (1 - row["PRED"]) >= bettings_strategy_away[0]
+        and (1 - row["PRED"]) * row["OddsA"] > bettings_strategy_away[1],
         axis=1,
     )
 
-    print_output and print(
-        "bets Home/Away",
-        games_with_predictions["BH"].sum(),
-        games_with_predictions["BA"].sum(),
-    )
-
-    profit_home = (
+    games_with_predictions["HPROFIT"] = (
         games_with_predictions["BH"]
         * games_with_predictions["H"]
         * games_with_predictions["OddsH"]
         - games_with_predictions["BH"]
-    ).sum()
-
-    profit_away = (
+    )
+    games_with_predictions["APROFIT"] = (
         games_with_predictions["BA"]
         * games_with_predictions["A"]
         * games_with_predictions["OddsA"]
         - games_with_predictions["BA"]
-    ).sum()
-
-    print_output and print("Profit Home/Away", profit_home, profit_away)
-
-    bets_home = games_with_predictions["BH"].sum() * 100
-    winrate_home = (
-        (games_with_predictions["BH"] * games_with_predictions["H"]).sum() / bets_home
-        if bets_home != 0
-        else 0
     )
 
-    bets_away = games_with_predictions["BA"].sum() * 100
-    winrate_away = (
-        (games_with_predictions["BA"] * games_with_predictions["A"]).sum() / bets_away
-        if bets_away != 0
-        else 0
-    )
-    print_output and print("Winrate Home/Away", winrate_home, winrate_away)
-    return profit_home, profit_away
+    return games_with_predictions.groupby("Season")[
+        "HPROFIT"
+    ].sum(), games_with_predictions.groupby("Season")["APROFIT"].sum()
 
 
 def analyze_rating(
@@ -373,25 +327,6 @@ def analyze_rating(
         plt.show()
 
 
-def adjust_model(
-    model: Callable[[pd.DataFrame], list[float]], a: float = 1, b: float = 0
-) -> Callable[[pd.DataFrame], list[float]]:
-    """
-    Adjust a model that outputs a line of the form y=ax+b into a line of the form y=x.
-
-    Still respects 0 as min and 1 as max values.
-    """
-
-    def helper(data: pd.DataFrame) -> list[float]:
-        output = np.array(model(data))
-        x = (output - b) / a + b
-        x[x >= 1] = 0.99
-        x[x <= 0] = 0.01
-        return list(x)
-
-    return helper
-
-
 def openskill_with_specific_model(
     model: type[BradleyTerryFull | BradleyTerryPart | PlackettLuce],
 ) -> Callable[[pd.DataFrame], list[float]]:
@@ -430,44 +365,62 @@ def main_analyze() -> None:
 
 
 def main_bets() -> None:
-    models = [openskill_with_specific_model(PlackettLuce)]
+    models = [pagerank_model]
     for i, model in enumerate(models):
         print(model)
-        max_away = -10000
-        for j in range(0, 20, 4):
+        max_home = -10000
+        for offset in range(0, 80, 4):
+            offset /= 100
             for threshold in range(120, 250, 25):
-                discard = 140
+                discard = 60
                 threshold /= 100
                 home, away = try_bets(
                     model=model,
-                    bettings_strategy_home=[100, 1],
-                    bettings_strategy_away=[j, threshold],
+                    bettings_strategy_home=[offset, threshold],
+                    bettings_strategy_away=[0, 1],
                     discard_per_season=discard,
                     print_output=False,
                 )
-                if max_away < away:
-                    treshold_away = threshold, j
-                    max_away = away
+                home = home.sum()
+                if max_home < home:
+                    treshold_away = threshold, offset
+                    max_home = home
 
         print("Tresholds", treshold_away)
-        print("Away", max_away)
+        print("Away", max_home)
 
 
 def currentBest():
-    a, _ = try_bets(
-        model=pagerank_model,
-        bettings_strategy_home=[0, 2],
-        bettings_strategy_away=[100, 1],
-        discard_per_season=90,
+    _, a = try_bets(
+        openskill_model,
+        bettings_strategy_home=[2, 0],
+        bettings_strategy_away=[0.66, 2],
+        discard_per_season=140,
+    )
+    b, _ = try_bets(
+        pagerank_model,
+        bettings_strategy_home=[0.16, 1.45],
+        bettings_strategy_away=[2, 1],
+        discard_per_season=60,
     )
 
-    _, b = try_bets(
-        model=openskill_with_specific_model(PlackettLuce),
-        bettings_strategy_home=[100, 1],
-        bettings_strategy_away=[0, 2],
-        discard_per_season=90,
+    plot = plt.subplot()
+    print(a.values)
+    plot.plot(a.index, a.values)
+    plot.plot(b.index, b.values)
+    plot.legend(["away", "home"])
+    plt.show()
+    # openRating [0.66, 2], discard 140
+    """
+    a, _ = try_bets(
+        model=pagerank_model,
+        bettings_strategy_home=[0, 1.45],
+        bettings_strategy_away=[100, 1],
+        discard_per_season=60,
     )
-    print("Current best is", a + b)
+    """
+    print(a.sum(), b.sum())
+    print("Current best is", a, b)
 
 
 currentBest()
