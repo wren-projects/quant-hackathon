@@ -337,6 +337,148 @@ class Data:
         )
 
 
+PageRankEdge = tuple[TeamID, TeamID]
+
+
+class RankingModel(Protocol):
+    """Ranking model interface."""
+
+    def add_match(self, match: Match) -> None:
+        """Add a match to the model."""
+        raise NotImplementedError
+
+    def reset(self) -> None:
+        """Reset the model."""
+        raise NotImplementedError
+
+
+class PageRank(RankingModel):
+    """Class for the page rank model."""
+
+    ALPHA = 0.85
+    TOL = 1e-6
+    MAX_ITER = 100
+
+    def __init__(self) -> None:
+        """
+        Initialize the BasketballPageRank class.
+
+        Args:
+            alpha: Damping factor for PageRank.
+            tol: Convergence tolerance.
+            max_iter: Maximum number of iterations.
+
+        """
+        self.teams: dict[TeamID, int] = {}
+        self.games: list[PageRankEdge] = []
+        self.__chached_ranks: dict[TeamID, float] | None = {}
+
+    def add_match(self, match: Match) -> None:
+        """
+        Add a match to the dataset.
+
+        Args:
+             match: line with data
+
+        """
+        self.teams.setdefault(match.HID, len(self.teams))
+        self.teams.setdefault(match.AID, len(self.teams))
+
+        match_edge = (match.HID, match.AID) if match.H else (match.AID, match.HID)
+        self.games.append(match_edge)
+        self.__chached_ranks = None
+
+    def ratings(self) -> dict[TeamID, float]:
+        """
+        Calculate the PageRank ratings for all teams.
+
+        Here is where the magic happen.
+
+        Returns:
+            ranks: Dictionary mapping team IDs to their PageRank scores.
+
+        """
+        if not self.teams:
+            return {}
+
+        if self.__chached_ranks:
+            return self.__chached_ranks
+
+        number_of_teams = len(self.teams)
+
+        # Build adjacency matrix
+        adjacency_matrix = np.zeros((number_of_teams, number_of_teams))
+        for loser, winner in self.games:
+            adjacency_matrix[self.teams[winner], self.teams[loser]] += 1
+
+        # Normalize the matrix
+        for i in range(adjacency_matrix.shape[0]):
+            if adjacency_matrix[i].sum() > 0:
+                adjacency_matrix[i] /= adjacency_matrix[i].sum()
+            else:
+                adjacency_matrix[i] = 1 / number_of_teams  # Handle dangling nodes
+
+        # PageRank algorithm
+        rank = np.ones(number_of_teams) / number_of_teams
+        for _ in range(self.MAX_ITER):
+            new_rank = (
+                self.ALPHA * adjacency_matrix.T @ rank
+                + (1 - self.ALPHA) / number_of_teams
+            )
+            if np.linalg.norm(new_rank - rank, ord=1) < self.TOL:
+                break
+            rank = new_rank
+
+        # Map scores to teams
+        ratings = {team: rank[self.teams[team]] for team in self.teams}
+        self.__chached_ranks = ratings
+        return ratings
+
+    def team_rating(
+        self, team_id1: TeamID, team_id2: TeamID
+    ) -> tuple[float | None, float | None]:
+        """
+        Get the rating of one or two teams.
+
+        Args:
+            team_id1: ID of the first team.
+            team_id2: ID of the second team.
+
+        Returns:
+            vector of ratings
+
+        """
+        ratings = self.ratings()
+        return (ratings.get(team_id1, None), ratings.get(team_id2, None))
+
+    def team_rating_ratio(self, team_id1: TeamID, team_id2: TeamID) -> float | None:
+        """
+        Get the ratio of winning two teams.
+
+        Args:
+            team_id1: ID of the first team.
+            team_id2: ID of the second team.
+
+        Returns:
+            ratio of winning(home 0, away 100)
+
+        """
+        ratings = self.ratings()
+
+        rating1 = ratings.get(team_id1, None)
+        rating2 = ratings.get(team_id2, None)
+
+        if rating1 is None or rating2 is None:
+            return None
+
+        return 100 * rating2 / (rating1 + rating2)
+
+    def reset(self) -> None:
+        """Reset all data (forget all teams and matches)."""
+        self.teams = {}
+        self.games = []
+
+
 class Player:
     """Handles betting strateggy."""
 
@@ -426,18 +568,6 @@ class Player:
             * summary.Bankroll
         )
         return np.array(proportions).round(decimals=0)
-
-
-class RankingModel(Protocol):
-    """Ranking model interface."""
-
-    def add_match(self, match: Match) -> None:
-        """Add a match to the model."""
-        raise NotImplementedError
-
-    def reset(self) -> None:
-        """Reset the model."""
-        raise NotImplementedError
 
 
 class TeamElo:
@@ -600,6 +730,7 @@ class Model:
         self.seen_matches = set()
         self.elo = Elo()
         self.elo_by_location = EloByLocation()
+        # self.pagerank = PageRank()
         self.player = Player()
         self.ai = Ai()
         self.trained = False
@@ -616,6 +747,7 @@ class Model:
             self.elo.add_match(match)
             self.elo_by_location.add_match(match)
             self.data.add_match(match)
+            # self.pagerank.add_match(match)
 
     def place_bets(
         self,
@@ -714,13 +846,10 @@ class Model:
         home_elo = self.elo.team_rating(match.HID)
         away_elo = self.elo.team_rating(match.AID)
         elo_by_location_prediction = self.elo_by_location.predict(match)
+        # home_page, away_page = self.pagerank.team_rating(match.HID, match.AID)
 
         rankings = pd.Series(
-            [
-                home_elo,
-                away_elo,
-                elo_by_location_prediction,
-            ],
+            [home_elo, away_elo, elo_by_location_prediction],
             index=self.RANKING_COLUMNS,
         )
 
@@ -769,6 +898,7 @@ class Model:
             self.data.add_match(match)
             self.elo.add_match(match)
             self.elo_by_location.add_match(match)
+            # self.pagerank.add_match(match)
 
         training_dataframe = pd.DataFrame(
             training_data, columns=pd.Index(self.TRAINING_DATA_COLUMNS)
@@ -781,28 +911,6 @@ class Model:
 
         self.ai.train_reg(training_dataframe, outcomes)
         self.trained = True
-
-
-def calculate_elo_accuracy(data: list[list[int]]) -> float:
-    """Calculate the accuracy of ELO predictions."""
-    correct_predictions = 0
-    total_games = len(data)
-    games = np.array(data)[:, :-1]
-    outcomes = np.array(data)[:, -1].clip(0, 1).round(decimals=0)
-    for i in range(len(data)):
-        elo_home = games[i][0]
-        elo_away = games[i][1]
-        outcome = outcomes[i]
-
-        # Predict home win if home ELO is greater than away ELO
-        predicted_outcome = 1 if elo_home > elo_away else 0
-
-        # Compare predicted outcome with actual outcome
-        if predicted_outcome == outcome:
-            correct_predictions += 1
-
-    # Calculate accuracy as a percentage
-    return correct_predictions / total_games
 
 
 class Ai:
