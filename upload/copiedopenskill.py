@@ -3,16 +3,62 @@
 Specific classes and functions for the Plackett-Luce model.
 """
 
-import sys
-from itertools import zip_longest
-from statistics import NormalDist
-from typing import Any, List, Tuple
+from __future__ import annotations
+
 import copy
 import itertools
 import math
+import sys
+from itertools import zip_longest
+from statistics import NormalDist
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type
 
 __all__: List[str] = ["PlackettLuce", "PlackettLuceRating"]
+
+
+class OpenSkillAPI:
+    def __init__(self):
+        self.rating_database = {}
+        self.model = PlackettLuce()
+
+    def _get_players(
+        self, home_id: any, away_id: any
+    ) -> tuple[list[PlackettLuceRating], list[PlackettLuceRating]]:
+        home_rating = self.rating_database.get(
+            home_id, (self.model.mu, self.model.sigma)
+        )
+        away_rating = self.rating_database.get(
+            away_id, (self.model.mu, self.model.sigma)
+        )
+
+        home_player = [self.model.rating(home_rating[0], home_rating[1])]
+        away_player = [self.model.rating(away_rating[0], away_rating[1])]
+        return home_player, away_player
+
+    def add_match(self, match: any) -> None:
+        home_id = match["HID"]
+        away_id = match["AID"]
+        home_score = match["H"]
+        home_player, away_player = self._get_players(home_id, away_id)
+
+        if home_score:
+            [[new_home_player], [new_away_player]] = self.model.rate(
+                [home_player, away_player]
+            )
+        else:
+            [[new_away_player], [new_home_player]] = self.model.rate(
+                [away_player, home_player]
+            )
+
+        self.rating_database[home_id] = (new_home_player.mu, new_home_player.sigma)
+        self.rating_database[away_id] = (new_away_player.mu, new_away_player.sigma)
+
+    def predict(self, match: any) -> float:
+        """Predict the result of the given match and return the change home wins (on a scale 0-1)."""
+        home_id = match["HID"]
+        away_id = match["AID"]
+        home_player, away_player = self._get_players(home_id, away_id)
+        return self.model.predict_win([home_player, away_player])[0]
 
 
 """
