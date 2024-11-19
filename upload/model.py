@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from scipy.optimize import minimize
-from sklearn import metrics, model_selection
+from sklearn import metrics, model_selection, neural_network
 
 if TYPE_CHECKING:
     import os
@@ -2034,7 +2034,7 @@ class EloByLocation(RankingModel):
         away_elo = self.teams_away.setdefault(match.AID, TeamElo())
 
         played_enough = home_elo.games >= 10 and away_elo.games >= 10
-        return 100 * home_elo.predict(away_elo.rating) if played_enough else None
+        return 100 * (home_elo.predict(away_elo.rating) if played_enough else 0.5)
 
     def reset(self) -> None:
         """Reset the model."""
@@ -2301,46 +2301,16 @@ class Ai:
     def train_reg(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
         """Return trained model."""
         x, x_val, y, y_val = model_selection.train_test_split(
-            training_dataframe.to_numpy()[:, :4],
+            training_dataframe.to_numpy(),
             outcomes.to_numpy(),
-            test_size=0.01,
+            test_size=0.05,
             shuffle=True,
             random_state=2,
         )
-        # self.plot_home_away(x)
-        Xy = xgb.DMatrix(x, y)
-        evals_result = {}
-        # if not self.initialized:
-        self.model = xgb.train(
-            {
-                "tree_method": "approx",
-                "max_depth": 5,
-                "random_state": 1001,
-                "seed": 1001,
-                "eval_metric": "mape",
-            },
-            Xy,
-            num_boost_round=64,
-            evals=[(Xy, "Train")],
-            evals_result=evals_result,
-            verbose_eval=False,
-        )
-        # shap = self.model.predict(Xy, pred_contribs=True)
-        # print("Train inicial")
+        self.model = neural_network.MLPRegressor(max_iter=100)
+        self.model.fit(x, y)
         self.initialized = True
-        """
-        refreshed = xgb.train(
-            {"process_type": "update", "updater": "refresh", "refresh_leaf": True},
-            Xy,
-            num_boost_round=n_rounds,
-            xgb_model=self.model,
-            evals=[(Xy, "Train")],
-            evals_result=evals_result,
-        )
-        self.model = refreshed"""
-        x_val = xgb.DMatrix(x_val)
-        """print("MAE:", metrics.mean_absolute_error(y_val, self.model.predict(x_val)))"""
-        # print(shap)
+        print("MAE:", metrics.mean_absolute_error(y_val, self.model.predict(x_val)))
 
     def get_probabilities(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
@@ -2348,9 +2318,7 @@ class Ai:
 
     def get_probabilities_reg(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
-        predicted_score_differences = self.model.predict(
-            xgb.DMatrix(dataframe.to_numpy()[:, :4])
-        )
+        predicted_score_differences = self.model.predict(dataframe.to_numpy())
         return self.calculate_probabilities(predicted_score_differences)
 
     def save_model(self, path: os.PathLike) -> None:
