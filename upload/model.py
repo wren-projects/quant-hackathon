@@ -2046,7 +2046,7 @@ class Model:
     """Main class."""
 
     TRAIN_SIZE: int = 4000
-    FIRST_TRAIN_MOD: int = 1
+    FIRST_TRAIN_MOD: int = 5
 
     def __init__(self) -> None:
         """Init classes."""
@@ -2092,11 +2092,11 @@ class Model:
             )"""
             self.train_ai_reg(cast(pd.DataFrame, games_increment[-train_size:]))
         elif games_increment.shape[0] > 0:
-            # increment_season = int(games_increment.iloc[0]["Season"])
-            # if self.season_number != increment_season:
-            #    self.elo.reset()
-            #    self.elo_by_location.reset()
-            #    self.season_number = increment_season
+            increment_season = int(games_increment.iloc[0]["Season"])
+            if self.season_number != increment_season:
+                self.elo.reset()
+                self.elo_by_location.reset()
+                self.season_number = increment_season
 
             self.old_matches = pd.concat(
                 [
@@ -2244,6 +2244,47 @@ class Model:
 class Ai:
     """Class for training and predicting."""
 
+    def plot_home_away(self, elo_data: np.ndarray) -> None:
+        """Plot ELO ranks for home and away teams."""
+        import matplotlib.pyplot as plt
+
+        if (
+            not isinstance(elo_data, np.ndarray)
+            or elo_data.ndim != 2
+            or elo_data.shape[1] < 2
+        ):
+            raise ValueError("Input.")
+
+        # Extract home and away ELO ranks
+        home_elo = elo_data[:, 0]
+        away_elo = elo_data[:, 1]
+        num_matches = elo_data.shape[0]
+
+        # Plotting the data
+        plt.figure(figsize=(15, 7))
+        plt.scatter(
+            range(num_matches),
+            home_elo,
+            label="Home ELO",
+            color="blue",
+            alpha=0.5,
+            s=10,
+        )
+        plt.scatter(
+            range(num_matches), away_elo, label="Away ELO", color="red", alpha=0.5, s=10
+        )
+
+        # Add labels and title
+        plt.xlabel("Match Index")
+        plt.ylabel("ELO Rank")
+        plt.title("ELO Ranks for Home and Away Teams")
+        plt.legend()
+        plt.grid(True, alpha=0.5)
+
+        # Show the plot
+        plt.tight_layout()
+        plt.show()
+
     def __init__(self):
         """Create a new Model from a XGBClassifier."""
         self.initialized = False
@@ -2260,12 +2301,13 @@ class Ai:
     def train_reg(self, training_dataframe: pd.DataFrame, outcomes: pd.Series) -> None:
         """Return trained model."""
         x, x_val, y, y_val = model_selection.train_test_split(
-            training_dataframe.to_numpy(),
+            training_dataframe.to_numpy()[:, :4],
             outcomes.to_numpy(),
             test_size=0.01,
             shuffle=True,
             random_state=2,
         )
+        # self.plot_home_away(x)
         Xy = xgb.DMatrix(x, y)
         evals_result = {}
         # if not self.initialized:
@@ -2307,7 +2349,7 @@ class Ai:
     def get_probabilities_reg(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Get probabilities for match outcome [home_loss, home_win]."""
         predicted_score_differences = self.model.predict(
-            xgb.DMatrix(dataframe.to_numpy())
+            xgb.DMatrix(dataframe.to_numpy()[:, :4])
         )
         return self.calculate_probabilities(predicted_score_differences)
 
