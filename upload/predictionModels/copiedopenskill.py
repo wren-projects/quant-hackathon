@@ -13,6 +13,8 @@ from itertools import zip_longest
 from statistics import NormalDist
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type
 
+import pandas as pd
+
 __all__: List[str] = ["PlackettLuce", "PlackettLuceRating"]
 
 
@@ -20,6 +22,8 @@ class OpenSkillAPI:
     def __init__(self):
         self.rating_database = {}
         self.model = PlackettLuce()
+        self.matches = 0
+        self.last_season = None
 
     def _get_players(
         self, home_id: any, away_id: any
@@ -36,9 +40,17 @@ class OpenSkillAPI:
         return home_player, away_player
 
     def add_match(self, match: any) -> None:
+        self.matches += 1
         home_id = match["HID"]
         away_id = match["AID"]
         home_score = match["H"]
+
+        season = match["Season"]
+        if self.last_season != season:
+            self.last_season = season
+            self.rating_database = {}
+            self.matches = 1
+
         home_player, away_player = self._get_players(home_id, away_id)
 
         if home_score:
@@ -59,6 +71,13 @@ class OpenSkillAPI:
         away_id = match["AID"]
         home_player, away_player = self._get_players(home_id, away_id)
         return self.model.predict_win([home_player, away_player])[0]
+
+    def ready(self) -> bool:
+        return self.matches >= 140
+
+    def should_bet_away(self, match: pd.DataFrame) -> float:
+        PRED = self.predict(match)
+        return self.ready() and (1 - PRED) >= 0.66 and (1 - PRED) * match["OddsA"] > 2
 
 
 """
